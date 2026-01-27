@@ -4,6 +4,22 @@ import requests
 import time
 import mimetypes
 
+# --- SECURITY: HIDE SIDEBAR NAVIGATION ---
+st.set_page_config(page_title="Screening", layout="centered", initial_sidebar_state="collapsed")
+
+st.markdown(
+    """
+    <style>
+        /* Hide the sidebar navigation */
+        [data-testid="stSidebarNav"] {display: none !important;}
+        /* Hide the sidebar collapse button */
+        [data-testid="collapsedControl"] {display: none !important;}
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+# -----------------------------------------
+
 # Minimalist config for a public-facing form
 st.set_page_config(page_title="Zentik Labs - Candidate Screening", layout="centered")
 
