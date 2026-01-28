@@ -5,37 +5,6 @@ import pandas as pd
 # --- SETUP ---
 st.set_page_config(page_title="Zentik HR", layout="wide", page_icon="🚀")
 
-# --- CUSTOM STYLING ---
-st.markdown("""
-<style>
-    .metric-card {
-        background-color: #1a1c24;
-        border: 1px solid #2b303b;
-        border-radius: 8px;
-        padding: 20px;
-        text-align: center;
-        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
-    }
-    .metric-value {
-        font-size: 28px;
-        font-weight: bold;
-        color: #4da6ff;
-    }
-    .metric-label {
-        font-size: 14px;
-        color: #a0a0a0;
-        margin-top: 5px;
-    }
-    .candidate-card {
-        background-color: #0e1117;
-        border-left: 5px solid #4da6ff;
-        padding: 15px;
-        margin-bottom: 10px;
-        border-radius: 5px;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 # Connect to DB
 try:
     supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
@@ -61,10 +30,9 @@ with c3:
 
 st.divider()
 
-# --- FETCH DATA (New Logic) ---
-# We fetch candidates and join with jobs to get the job title
+# --- FETCH DATA ---
 try:
-    # Fetch Candidates
+    # Explicitly asking for the foreign key relationship
     cands = supabase.table("candidates").select("*, jobs(title)").order("created_at", desc=True).execute().data
     
     if not cands:
@@ -73,7 +41,7 @@ try:
 
     df = pd.DataFrame(cands)
     
-    # Extract Job Title safely
+    # Safe Extraction
     df['job_title'] = df['jobs'].apply(lambda x: x.get('title') if x else "Unassigned")
     df['match_score'] = df['match_score'].fillna(0)
     df['status'] = df['status'].fillna("New")
@@ -88,64 +56,47 @@ avg_score = df['match_score'].mean()
 hired = len(df[df['status'].isin(['Hired', 'Pending Hire', 'Placed'])])
 pending = len(df[df['status'] == 'New'])
 
-col1, col2, col3, col4 = st.columns(4)
-col1.markdown(f'<div class="metric-card"><div class="metric-value">{total}</div><div class="metric-label">Total Applicants</div></div>', unsafe_allow_html=True)
-col2.markdown(f'<div class="metric-card"><div class="metric-value">{avg_score:.1f}%</div><div class="metric-label">Avg Quality Score</div></div>', unsafe_allow_html=True)
-col3.markdown(f'<div class="metric-card"><div class="metric-value">{hired}</div><div class="metric-label">Hired / Pending</div></div>', unsafe_allow_html=True)
-col4.markdown(f'<div class="metric-card"><div class="metric-value">{pending}</div><div class="metric-label">Need Review</div></div>', unsafe_allow_html=True)
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Total Applicants", total)
+m2.metric("Avg Quality Score", f"{avg_score:.1f}%")
+m3.metric("Hired / Pending", hired)
+m4.metric("Need Review", pending)
 
 st.divider()
 
 # --- RECENT ACTIVITY FEED ---
 st.subheader("🕒 Recent Applications")
 
-# Filter by Job Role
 roles = ["All Roles"] + sorted(df['job_title'].unique().tolist())
 selected_role = st.selectbox("Filter by Role", roles)
 
 filtered_df = df if selected_role == "All Roles" else df[df['job_title'] == selected_role]
 
 for index, row in filtered_df.iterrows():
-    # Dynamic Color for Border
+    # Determine Status Color
     score = row['match_score']
-    border_color = "#2ecc71" if score > 80 else "#f1c40f" if score > 50 else "#e74c3c"
+    status = row['status']
     
-    with st.container():
-        # HTML Card Layout
-        st.markdown(f"""
-        <div style="
-            background-color: #1a1c24; 
-            border-left: 5px solid {border_color}; 
-            padding: 15px; 
-            border-radius: 8px; 
-            margin-bottom: 15px; 
-            display: flex; 
-            justify-content: space-between; 
-            align-items: center;">
-            
-            <div style="flex: 3;">
-                <h3 style="margin: 0; color: white;">{row['name']}</h3>
-                <p style="margin: 5px 0; color: #a0a0a0;">
-                    {row['job_title']} | <span style="color: #4da6ff;">{row['status']}</span> | {str(row['created_at'])[:10]}
-                </p>
-                <p style="font-size: 0.9em; color: #888;">{row.get('summary', '')[:120]}...</p>
-            </div>
-            
-            <div style="flex: 1; text-align: center;">
-                <h2 style="margin: 0; color: {border_color};">{int(score)}%</h2>
-                <small style="color: #888;">Match Score</small>
-            </div>
-            
-        </div>
-        """, unsafe_allow_html=True)
+    # Create a nice container for each candidate
+    with st.container(border=True):
+        cols = st.columns([4, 1, 2])
         
-        # Action Buttons (Hidden inside expander to keep clean)
-        with st.expander("👉 View Actions"):
-            ac1, ac2 = st.columns([1, 4])
-            with ac1:
+        with cols[0]:
+            st.subheader(row['name'])
+            st.caption(f"Role: {row['job_title']} | Status: {status}")
+            st.write(f"_{row.get('summary', '')[:120]}..._")
+            
+        with cols[1]:
+            # Color-coded score
+            color = "green" if score > 80 else "orange" if score > 50 else "red"
+            st.markdown(f"## :{color}[{int(score)}%]")
+            st.caption("Match Score")
+            
+        with cols[2]:
+            st.markdown("<br>", unsafe_allow_html=True) # spacer
+            c_btn1, c_btn2 = st.columns(2)
+            with c_btn1:
                 st.link_button("📄 Resume", row['resume_url'])
-            with ac2:
-                if st.button(f"🔍 Analyze {row['name'].split()[0]}", key=f"btn_{row['id']}"):
-                    # NOTE: To jump to specific candidate, we normally use query params
-                    # But for now, we just redirect to the page
+            with c_btn2:
+                if st.button("🔍 Analyze", key=f"btn_{row['id']}"):
                     st.switch_page("pages/Candidate_Analysis.py")
