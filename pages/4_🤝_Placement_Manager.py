@@ -2,9 +2,8 @@ import streamlit as st
 from supabase import create_client
 from styles import load_css, hero_section
 import time
-import mimetypes
 
-st.set_page_config(page_title="Placement & MRF", layout="wide")
+st.set_page_config(page_title="Placement Manager", layout="wide")
 load_css()
 
 try:
@@ -15,19 +14,18 @@ except:
 
 hero_section(
     "assets/login_hero.jpg",
-    "Placement Manager",
-    "Finalize hires and attach Manpower Requisition Forms"
+    "Placement & MRF Center",
+    "Fill out the Digital Manpower Requisition Form (MRF) to initiate hiring."
 )
 
-# --- STEP 1: FETCH PENDING HIRES ---
-st.subheader("1. Pending Placements")
-st.caption("Select a candidate who has been marked as 'Pending Hire' to finalize their paperwork.")
+# --- STEP 1: SELECT PENDING HIRE ---
+st.subheader("1. Select Candidate for Placement")
 
-# Fetch only placements that are waiting for MRF (status = 'Pending Hire')
-# We join with candidates and jobs to get names and titles
+# Fetch candidates marked as "Pending Hire" in the placements table
+# Note: We look for status 'Pending Hire' to catch them BEFORE the MRF is filled
 try:
     response = supabase.table("placements").select(
-        "id, candidate_id, job_id, status, candidates(name, email), jobs(title)"
+        "id, candidate_id, job_id, status, candidates(name, email), jobs(title, department)"
     ).eq("status", "Pending Hire").execute()
     
     pending_list = response.data
@@ -36,11 +34,10 @@ except Exception as e:
     st.stop()
 
 if not pending_list:
-    st.info("✅ No pending hires found. Go to 'Candidate Analysis' to hire someone!")
+    st.info("✅ No pending hires waiting for MRF. Go to 'Candidate Analysis' to select a hire.")
     st.stop()
 
-# Create a mapping for the dropdown
-# Format: "John Doe - Sales Manager"
+# Dropdown Map
 placement_map = {
     f"{p['candidates']['name']} - {p['jobs']['title']}": p 
     for p in pending_list
@@ -51,83 +48,62 @@ selected_placement = placement_map[selected_label]
 
 candidate_name = selected_placement['candidates']['name']
 job_title = selected_placement['jobs']['title']
+dept = selected_placement['jobs'].get('department', 'General')
 placement_id = selected_placement['id']
 
-st.success(f"Selected: **{candidate_name}** for **{job_title}**")
+st.info(f"Drafting MRF for: **{candidate_name}** | Role: **{job_title}**")
 
-# --- STEP 2: UPLOAD MRF ---
+# --- STEP 2: DIGITAL MRF FORM ---
 st.divider()
-st.subheader("2. Upload MRF (Manpower Requisition Form)")
-st.caption(f"Upload the signed approval for {candidate_name}.")
+st.subheader("2. Digital MRF Requisition")
+st.caption("Fill out the hiring details below. This will be sent to Management for approval.")
 
-uploaded_mrf = st.file_uploader("Upload Document", type=["pdf", "docx", "png", "jpg", "jpeg"])
+with st.form("digital_mrf_form"):
+    c1, c2 = st.columns(2)
+    with c1:
+        hiring_manager = st.text_input("Hiring Manager Name", placeholder="e.g. Sarah Connor")
+        emp_type = st.selectbox("Employment Type", ["Full-Time", "Contract", "Internship", "Part-Time"])
+    with c2:
+        proposed_salary = st.text_input("Proposed Salary / Rate", placeholder="e.g. $85,000/yr")
+        start_date = st.date_input("Target Start Date")
 
-if st.button("💾 Finalize & Place", type="primary"):
-    if uploaded_mrf:
-        try:
-            # 1. Upload File to Supabase Storage
-            file_ext = uploaded_mrf.name.split('.')[-1]
-            # Unique filename: time_placementID.ext
-            file_path = f"mrf/{int(time.time())}_{placement_id}.{file_ext}"
-            content_type = mimetypes.guess_type(uploaded_mrf.name)[0] or "application/octet-stream"
-            
-            # Use 'resumes' bucket (or create a 'documents' bucket if you prefer)
-            supabase.storage.from_("resumes").upload(
-                path=file_path, 
-                file=uploaded_mrf.getvalue(), 
-                file_options={"content-type": content_type, "upsert": "true"}
-            )
-            
-            # Get Public URL
-            mrf_url = supabase.storage.from_("resumes").get_public_url(file_path)
+    justification = st.text_area("Hiring Justification", placeholder="Reason for hire (e.g. Replacement for X, New Role for Q3 growth...)", height=100)
+    
+    submitted = st.form_submit_button("🚀 Submit for Approval", type="primary")
 
-            # 2. Update Placement Record
-            # Change status to 'Placed' and save the URL
-            supabase.table("placements").update({
-                "status": "Placed",
-                "mrf_url": mrf_url,
-                "placed_at": "now()"
-            }).eq("id", placement_id).execute()
-            
-            # 3. Update Candidate Status (Optional, keeps them synced)
-            supabase.table("candidates").update({
-                "status": "Placed"
-            }).eq("id", selected_placement['candidate_id']).execute()
+    if submitted:
+        if not hiring_manager or not proposed_salary:
+            st.error("Please fill in the Hiring Manager and Salary fields.")
+        else:
+            try:
+                # Update the placement record with the form data
+                # Change status to 'Pending Approval' so it moves to the next page
+                supabase.table("placements").update({
+                    "hiring_manager": hiring_manager,
+                    "employment_type": emp_type,
+                    "proposed_salary": proposed_salary,
+                    "start_date": str(start_date),
+                    "justification": justification,
+                    "status": "Pending Approval"  # <--- Moves it to Approval Inbox
+                }).eq("id", placement_id).execute()
 
-            st.balloons()
-            st.success(f"🎉 {candidate_name} has been successfully placed!")
-            time.sleep(2)
-            st.rerun()
-            
-        except Exception as e:
-            st.error(f"Error finalizing placement: {e}")
-    else:
-        st.warning("⚠️ Please upload the MRF document first.")
+                st.balloons()
+                st.success("MRF Submitted Successfully! Sent to Management Approval.")
+                time.sleep(2)
+                st.rerun()
 
-# --- STEP 3: HISTORY ---
+            except Exception as e:
+                st.error(f"Error submitting MRF: {e}")
+
+# --- VIEW HISTORY ---
 st.divider()
-st.subheader("📂 Placement History")
-
-# Fetch completed placements
+st.markdown("### 🕒 Recent Submissions")
 try:
     history = supabase.table("placements").select(
-        "placed_at, mrf_url, candidates(name), jobs(title)"
-    ).eq("status", "Placed").order("placed_at", desc=True).execute().data
+        "created_at, status, candidates(name), jobs(title)"
+    ).neq("status", "Pending Hire").order("created_at", desc=True).limit(5).execute().data
 
-    if history:
-        for p in history:
-            with st.container():
-                c1, c2, c3 = st.columns([2, 2, 1])
-                c1.write(f"**{p['candidates']['name']}**")
-                c2.write(f"Role: {p['jobs']['title']}")
-                
-                if p.get('mrf_url'):
-                    c3.link_button("📄 View MRF", p['mrf_url'])
-                else:
-                    c3.write("No Doc")
-                st.divider()
-    else:
-        st.caption("No finalized placements yet.")
-
+    for h in history:
+        st.caption(f"{h['created_at'][:10]} | {h['candidates']['name']} ({h['jobs']['title']}) - **{h['status']}**")
 except:
     pass

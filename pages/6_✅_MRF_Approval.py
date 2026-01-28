@@ -1,149 +1,104 @@
 import streamlit as st
 from supabase import create_client
-from styles import load_css, hero_section
-import time
-import mimetypes
+import pandas as pd
 
-st.set_page_config(page_title="MRF Approval", layout="wide")
-load_css()
-supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+st.set_page_config(page_title="Management Approval", layout="wide")
 
-hero_section(
-    "assets/login_hero.jpg", 
-    "Management Approval",
-    "Review, Sign, and Approve Manpower Requisitions"
-)
+# --- CUSTOM STYLE ---
+st.markdown("""
+<style>
+    .approval-card {
+        background-color: #1a1c24;
+        border-left: 5px solid #f1c40f; /* Yellow for Pending */
+        padding: 20px;
+        margin-bottom: 20px;
+        border-radius: 5px;
+    }
+    .data-label { color: #a0a0a0; font-size: 0.9em; }
+    .data-value { color: #ffffff; font-weight: bold; font-size: 1.1em; }
+</style>
+""", unsafe_allow_html=True)
 
-# Create Tabs for Workflow
-tab_inbox, tab_history = st.tabs(["📥 Pending Inbox", "📜 Approval History"])
+try:
+    supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+except:
+    st.error("Missing Supabase Secrets.")
+    st.stop()
 
-# ==========================================
-# TAB 1: PENDING INBOX (Your To-Do List)
-# ==========================================
-with tab_inbox:
+st.title("🛡️ Management Approval Board")
+st.markdown("Review and authorize pending Manpower Requisitions.")
+
+tab_pending, tab_history = st.tabs(["📥 Pending Inbox", "✅ Approval History"])
+
+# --- TAB 1: PENDING APPROVALS ---
+with tab_pending:
+    # Fetch placements waiting for approval
     try:
-        # Get all placements waiting for approval
         response = supabase.table("placements").select(
-            "*, jobs(title, department), candidates(name, email)"
-        ).eq("status", "pending_approval").order("created_at", desc=True).execute()
+            "*, candidates(name), jobs(title, department)"
+        ).eq("status", "Pending Approval").order("created_at", desc=True).execute()
         
         pending_items = response.data
     except Exception as e:
         st.error(f"Error fetching data: {e}")
-        pending_items = []
+        st.stop()
 
     if not pending_items:
-        st.info("✅ All caught up! No pending approvals.")
+        st.success("🎉 All caught up! No pending approvals.")
     else:
-        st.markdown(f"### ⏳ Waiting for Signature ({len(pending_items)})")
-        
-        for item in pending_items:
+        for p in pending_items:
+            # Layout: Card for each request
             with st.container():
-                # Header
-                c1, c2, c3 = st.columns([2, 2, 2])
-                c1.markdown(f"**{item['candidates']['name']}**")
-                c2.markdown(f"Role: **{item['jobs']['title']}**")
-                c3.caption(f"Drafted: {item['created_at'][:10]}")
+                st.markdown(f"""
+                <div class="approval-card">
+                    <h3>{p['candidates']['name']} <span style="font-size:0.7em; color:#888;">for</span> {p['jobs']['title']}</h3>
+                    <p style="color:#4da6ff;">{p['jobs'].get('department', 'General Dept')}</p>
+                </div>
+                """, unsafe_allow_html=True)
                 
-                # Review Area
-                with st.expander(f"Review Requisition", expanded=False):
-                    col_left, col_right = st.columns(2)
-                    
-                    # LEFT: Review Draft
-                    with col_left:
-                        st.info("ℹ️ **Step 1: Review Draft**")
-                        st.write(f"Department: **{item['jobs']['department']}**")
-                        st.markdown(f"[📄 Download Draft MRF]({item['mrf_url']})")
+                # Digital MRF Details Grid
+                c1, c2, c3, c4 = st.columns(4)
+                c1.markdown(f"**💰 Salary:**\n\n{p.get('proposed_salary', 'N/A')}")
+                c2.markdown(f"**📅 Start Date:**\n\n{p.get('start_date', 'N/A')}")
+                c3.markdown(f"**👤 Manager:**\n\n{p.get('hiring_manager', 'N/A')}")
+                c4.markdown(f"**📋 Type:**\n\n{p.get('employment_type', 'N/A')}")
+                
+                st.markdown(f"**📝 Justification:**")
+                st.info(p.get('justification', 'No justification provided.'))
+                
+                # Action Buttons
+                col_approve, col_reject = st.columns([1, 6])
+                
+                with col_approve:
+                    if st.button("✅ APPROVE", key=f"app_{p['id']}", type="primary"):
+                        # Update status to 'Approved'
+                        supabase.table("placements").update({"status": "Approved"}).eq("id", p['id']).execute()
+                        # Also update Candidate status to 'Hired' officially
+                        supabase.table("candidates").update({"status": "Hired"}).eq("id", p['candidate_id']).execute()
+                        st.success("Approved!")
+                        st.rerun()
                         
-                        st.divider()
-                        
-                        # REJECT BUTTON
-                        with st.form(key=f"reject_{item['id']}"):
-                            reason = st.text_input("Reason for Rejection")
-                            if st.form_submit_button("❌ Reject Request"):
-                                if reason:
-                                    supabase.table("placements").update({
-                                        "status": "rejected",
-                                        "rejection_reason": reason
-                                    }).eq("id", item['id']).execute()
-                                    st.rerun()
-                                else:
-                                    st.warning("Please provide a reason.")
+                with col_reject:
+                    if st.button("🚫 REJECT", key=f"rej_{p['id']}"):
+                        supabase.table("placements").update({"status": "Rejected by Mgmt"}).eq("id", p['id']).execute()
+                        st.error("Request Rejected.")
+                        st.rerun()
+                
+                st.divider()
 
-                    # RIGHT: Approve & Sign
-                    with col_right:
-                        st.success("✅ **Step 2: Approve & Sign**")
-                        st.caption("Upload the signed/stamped MRF to finalize.")
-                        
-                        signed_file = st.file_uploader("Upload Signed MRF", type=["pdf", "jpg", "png"], key=f"up_{item['id']}")
-                        
-                        if st.button("🚀 Approve & Hire", key=f"btn_{item['id']}", type="primary"):
-                            if signed_file:
-                                try:
-                                    # Upload
-                                    file_ext = signed_file.name.split('.')[-1]
-                                    path = f"signed_mrf/{int(time.time())}_{item['id']}.{file_ext}"
-                                    content_type = mimetypes.guess_type(signed_file.name)[0]
-                                    
-                                    supabase.storage.from_("resumes").upload(
-                                        path=path, 
-                                        file=signed_file.getvalue(), 
-                                        file_options={"content-type": content_type, "upsert": "true"}
-                                    )
-                                    signed_url = supabase.storage.from_("resumes").get_public_url(path)
-
-                                    # Update DB (Change status to approved)
-                                    supabase.table("placements").update({
-                                        "status": "approved",
-                                        "signed_mrf_url": signed_url
-                                    }).eq("id", item['id']).execute()
-                                    
-                                    st.balloons()
-                                    time.sleep(1)
-                                    st.rerun()
-                                    
-                                except Exception as e:
-                                    st.error(f"Upload failed: {e}")
-                            else:
-                                st.warning("Upload the signed doc first.")
-            st.divider()
-
-# ==========================================
-# TAB 2: HISTORY (The Archive)
-# ==========================================
+# --- TAB 2: HISTORY ---
 with tab_history:
-    st.markdown("### 🗄️ Placements Archive")
-    st.caption("This is your permanent record for analysis.")
-    
     try:
-        # Fetch everything that is NOT pending
-        history_response = supabase.table("placements").select(
-            "*, jobs(title, department), candidates(name)"
-        ).neq("status", "pending_approval").order("created_at", desc=True).execute()
+        history = supabase.table("placements").select(
+            "*, candidates(name), jobs(title)"
+        ).in_("status", ["Approved", "Rejected by Mgmt"]).order("created_at", desc=True).execute().data
         
-        history_items = history_response.data
+        if history:
+            st.dataframe(
+                pd.DataFrame(history)[['created_at', 'status', 'candidates', 'jobs', 'hiring_manager']],
+                use_container_width=True
+            )
+        else:
+            st.info("No history yet.")
     except:
-        history_items = []
-
-    if history_items:
-        for h in history_items:
-            # Color Code the Status
-            color = "🟢" if h['status'] == 'approved' else "🔴"
-            
-            with st.expander(f"{color} {h['candidates']['name']} - {h['jobs']['title']}"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.write(f"**Status:** {h['status'].upper()}")
-                    st.write(f"**Date:** {h['created_at'][:10]}")
-                    st.write(f"**Department:** {h['jobs']['department']}")
-                
-                with c2:
-                    if h['status'] == 'approved':
-                        st.success("Candidate Hired")
-                        st.link_button("📄 View Signed MRF", h['signed_mrf_url'])
-                    else:
-                        st.error("Candidate Rejected")
-                        st.write(f"**Reason:** {h.get('rejection_reason', 'N/A')}")
-                        st.link_button("📄 View Draft MRF", h['mrf_url'])
-    else:
-        st.info("No history found yet.")
+        pass
