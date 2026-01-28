@@ -26,10 +26,7 @@ except:
     selected_job_title = "All" # Fallback if jobs table is empty
 
 # Fetch Candidates
-# We fetch 'name' and 'email' (matching your actual DB columns)
 query = supabase.table("candidates").select("*").order("match_score", desc=True)
-
-# (Optional: Add filtering logic here if you add a job_id column later)
 response = query.execute()
 candidates = response.data
 
@@ -41,7 +38,7 @@ if not candidates:
 df = pd.DataFrame(candidates)
 df['created_at'] = pd.to_datetime(df['created_at']).dt.date
 
-# List Selection (FIXED: Uses 'name' instead of 'candidate_name')
+# List Selection
 selected_candidate_id = st.sidebar.radio(
     "Select Candidate", 
     options=df['id'].tolist(),
@@ -56,12 +53,13 @@ candidate = df[df['id'] == selected_candidate_id].iloc[0]
 # Header Section
 col1, col2, col3 = st.columns([1, 2, 1])
 with col1:
-    score = candidate.get('match_score', 0) # Safe get
+    score = candidate.get('match_score', 0) 
     color = "green" if score > 80 else "orange" if score > 50 else "red"
     st.markdown(f"## Score: :{color}[{score}%]")
 with col2:
-    st.header(candidate['name'])
-    st.caption(f"Applied: {candidate['created_at']} | Email: {candidate['email']}")
+    st.header(candidate.get('name', 'Unknown Name'))
+    # Show Applied Date
+    st.caption(f"📅 Applied: {candidate['created_at']}")
 with col3:
     red_flags = candidate.get('red_flags', 'None')
     if red_flags and red_flags != "None":
@@ -74,8 +72,38 @@ st.divider()
 # Two-Column Layout
 left_col, right_col = st.columns(2)
 
-# --- LEFT COLUMN: THE RESUME ANALYSIS ---
+# --- LEFT COLUMN: PROFILE & ANALYSIS ---
 with left_col:
+    # --- NEW SECTION: CONTACT & PROFILE ---
+    with st.expander("👤 Contact & Personal Details", expanded=True):
+        # Layout: Grid for details
+        p_col1, p_col2 = st.columns(2)
+        
+        with p_col1:
+            st.markdown(f"**📞 Phone:** \n{candidate.get('phone', 'Not Found')}")
+            st.markdown(f"**📧 Email:** \n{candidate.get('email', 'Not Found')}")
+        
+        with p_col2:
+            st.markdown(f"**🌍 Nationality:** \n{candidate.get('nationality', 'Not Found')}")
+            st.markdown(f"**🏠 Residence:** \n{candidate.get('residence', 'Not Found')}")
+
+        st.divider()
+        
+        # LinkedIn & Suggested Role
+        l_col1, l_col2 = st.columns(2)
+        with l_col1:
+            linkedin = candidate.get('linkedin_url')
+            if linkedin and isinstance(linkedin, str) and linkedin.lower() not in ['null', 'not found', 'none', 'n/a']:
+                st.markdown(f"**🔗 LinkedIn:** [Open Profile]({linkedin})")
+            else:
+                st.markdown("**🔗 LinkedIn:** Not Found")
+        
+        with l_col2:
+            suggested_fit = candidate.get('suggested_fit')
+            if suggested_fit:
+                st.markdown(f"**💡 AI Suggested Role:** \n`{suggested_fit}`")
+
+    # --- EXISTING ANALYSIS SECTION ---
     st.subheader("📄 AI Resume Analysis")
     
     with st.expander("Executive Summary", expanded=True):
@@ -86,6 +114,7 @@ with left_col:
         if isinstance(skills, str):
             st.write(skills)
         elif isinstance(skills, list):
+            # Display as nice tags
             st.markdown(" ".join([f"`{s}`" for s in skills]))
 
     st.markdown("###  Missing / Critical Gaps")
@@ -112,7 +141,6 @@ with right_col:
             except:
                 questions = [questions] 
         
-        # Ensure it is a list before looping
         if isinstance(questions, list):
             for i, q in enumerate(questions):
                 st.markdown(f"**Q{i+1}:** {q}")
@@ -134,6 +162,7 @@ with right_col:
         
         if save_btn:
             try:
+                # Update using 'id' (UUID) which is safer than match_score ordering
                 supabase.table("candidates").update({"interview_notes": new_notes}).eq("id", candidate['id']).execute()
                 st.success("Notes saved successfully!")
                 st.rerun()
