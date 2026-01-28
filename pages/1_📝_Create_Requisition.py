@@ -199,7 +199,11 @@ if submitted_draft:
     try:
         pdf = MRF_PDF()
         pdf.draw_form(mrf_data)
-        pdf_bytes = pdf.output(dest='S').encode('latin-1')
+        
+        # --- FIX IS HERE ---
+        # pdf.output(dest='S') returns a bytearray in modern fpdf2.
+        # We simply convert it to bytes. No .encode() needed.
+        pdf_bytes = bytes(pdf.output(dest='S')) 
         
         st.divider()
         col_dl, col_ul = st.columns(2)
