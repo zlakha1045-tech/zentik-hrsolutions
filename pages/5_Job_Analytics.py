@@ -72,10 +72,24 @@ col_left, col_right = st.columns([2, 1])
 
 with col_left:
     st.subheader("📈 Application Trend")
+    # Group by Date
     daily_counts = df.groupby('date').size().reset_index(name='Applicants')
+    
     if not daily_counts.empty:
-        fig = px.line(daily_counts, x='date', y='Applicants', markers=True, template="plotly_dark")
+        # USE BAR CHART INSTEAD OF LINE
+        fig = px.bar(
+            daily_counts, 
+            x='date', 
+            y='Applicants', 
+            title="Daily Volume",
+            template="plotly_dark",
+            color_discrete_sequence=['#4da6ff']
+        )
+        # Force the Y-axis to show integers (0, 1, 2...) instead of decimals
+        fig.update_yaxes(dtick=1) 
         st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("Not enough data for trend analysis.")
 
 with col_right:
     st.subheader("🔻 Funnel Status")
