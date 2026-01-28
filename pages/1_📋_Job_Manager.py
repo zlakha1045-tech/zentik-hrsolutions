@@ -34,11 +34,7 @@ with st.expander("➕ Create or Edit Job Posting", expanded=True):
     # 1. Document Upload for Auto-fill
     uploaded_jd = st.file_uploader("Optional: Auto-fill from JD", type=["pdf", "docx"])
     
-    # Session State to hold questions during the editing process
-    if 'current_questions' not in st.session_state:
-        st.session_state.current_questions = ""
-
-    auto_title, auto_desc, auto_reqs = "", "", ""
+    auto_title, auto_desc = "", ""
     
     if uploaded_jd:
         try:
@@ -48,11 +44,11 @@ with st.expander("➕ Create or Edit Job Posting", expanded=True):
             auto_desc = raw_text
             st.success("✅ Document parsed!")
         except Exception as e:
-            st.error(f"Error: {e}")
+            st.error(f"Error parsing document: {e}")
 
     st.divider()
 
-    with st.form("job_form", clear_on_submit=False):
+    with st.form("job_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
             title = st.text_input("Job Title", value=auto_title)
@@ -60,63 +56,49 @@ with st.expander("➕ Create or Edit Job Posting", expanded=True):
         with col2:
             status = st.selectbox("Status", ["active", "draft", "closed"])
             
-        description = st.text_area("Job Description", value=auto_desc, height=150)
-        requirements = st.text_area("Strict Requirements (Internal Reference)", value=auto_reqs, height=100)
-
-        # --- THE QUESTION EDITOR ---
-        st.markdown("### ❓ Screening Questionnaire Designer")
-        st.caption("Edit, add, or delete questions below. Place each question on a NEW line.")
+        description = st.text_area("Job Description", value=auto_desc, height=250, help="The AI will use this text to generate interview questions.")
         
-        # If the user enters requirements, we can provide a button to generate a draft
-        # But we let them type directly into this box to OVERRIDE everything
-        manual_questions = st.text_area(
-            "Final Screening Questions", 
-            value=st.session_state.current_questions,
-            height=200,
-            help="These are the actual questions sent to candidates. Editing this does NOT change your requirements text above."
-        )
-        
-        c1, c2 = st.columns([1, 4])
-        # Button to 'Suggest' questions from the requirements box
-        if c1.form_submit_button("🪄 Draft from Reqs"):
-            lines = [r.strip().replace("-", "").strip() for r in requirements.split('\n') if len(r.strip()) > 10]
-            st.session_state.current_questions = "\n".join(lines)
-            st.rerun()
+        # We keep 'Requirements' as a separate field just for internal reference if needed
+        requirements = st.text_area("Strict Requirements (Internal Reference)", height=100)
 
-        submitted = st.form_submit_button("🚀 Save Job & Questionnaire", type="primary")
+        submitted = st.form_submit_button("🚀 Save Job Role", type="primary")
         
         if submitted:
             if title and description:
-                # Turn the text area back into a list for the database
-                q_list = [q.strip() for q in manual_questions.split('\n') if q.strip()]
-                
                 try:
                     data = {
                         "title": title,
                         "department": department,
                         "description": description,
                         "requirements": requirements,
-                        "status": status,
-                        "screening_questions": q_list
+                        "status": status
                     }
                     supabase.table("jobs").insert(data).execute()
-                    st.success("Job and Custom Questionnaire saved!")
-                    st.session_state.current_questions = "" # Reset
+                    st.success(f"Job '{title}' saved successfully!")
                     st.rerun()
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error saving to database: {e}")
+            else:
+                st.warning("Please provide at least a Job Title and Description.")
 
 st.divider()
 
 # --- SECTION 2: MANAGE JOBS ---
 st.subheader("Manage Active Postings")
+
+# Fetch jobs
 response = supabase.table("jobs").select("*").order("created_at", desc=True).execute()
-for job in response.data:
-    status_color = "🟢" if job['status'] == 'active' else "🟡" if job['status'] == 'draft' else "🔴"
-    with st.expander(f"{status_color} {job['title']}"):
-        # This ensures that even if Supabase returns None, we treat it as 0
-        q_count = len(job.get('screening_questions') or [])
-        st.write(f"**Questions Set:** {q_count}")
-        if st.button(f"Delete {job['title']}", key=f"del_{job['id']}", type="primary"):
-            supabase.table("jobs").delete().eq("id", job['id']).execute()
-            st.rerun()
+
+if response.data:
+    for job in response.data:
+        status_color = "🟢" if job['status'] == 'active' else "🟡" if job['status'] == 'draft' else "🔴"
+        
+        with st.expander(f"{status_color} {job['title']} ({job['department']})"):
+            st.caption(f"Status: {job['status']} | Created: {job['created_at'][:10]}")
+            st.text_area("Description Preview", job['description'], height=100, disabled=True, key=f"desc_{job['id']}")
+            
+            if st.button(f"Delete {job['title']}", key=f"del_{job['id']}", type="secondary"):
+                supabase.table("jobs").delete().eq("id", job['id']).execute()
+                st.rerun()
+else:
+    st.info("No jobs found. Create one above!")

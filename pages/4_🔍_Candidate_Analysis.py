@@ -1,166 +1,138 @@
 import streamlit as st
 from supabase import create_client
+import pandas as pd
 import json
-import time  # FIXED: Added missing import
-from styles import load_css, hero_section
 
-st.set_page_config(page_title="Deep Dive", layout="wide")
-load_css()
-supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+# --- SETUP ---
+st.set_page_config(page_title="Candidate Analysis", layout="wide")
 
-# Hero
-hero_section(
-    "assets/analysis_hero.jpg",
-    "Candidate Deep Dive",
-    "Detailed skills gap analysis and risk assessment"
+try:
+    supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+except:
+    st.error("Missing Supabase Secrets.")
+    st.stop()
+
+st.title("🕵️ HR Analysis & Interview Copilot")
+
+# --- 1. SIDEBAR: FILTER & SELECT ---
+st.sidebar.header("Filter Candidates")
+
+# Fetch Jobs for Filter
+jobs_response = supabase.table("jobs").select("id, title").execute()
+jobs_dict = {j['title']: j['id'] for j in jobs_response.data}
+selected_job_title = st.sidebar.selectbox("Filter by Role", ["All"] + list(jobs_dict.keys()))
+
+# Fetch Candidates based on filter
+query = supabase.table("candidates").select("*").order("match_score", desc=True)
+if selected_job_title != "All":
+    # Note: Ensure your candidate table has a 'job_id' column if you want strict filtering
+    # For now, we will just show all, or filter if you have the column
+    pass 
+
+response = query.execute()
+candidates = response.data
+
+if not candidates:
+    st.info("No candidates found yet. Go to 'Upload Center' to add some!")
+    st.stop()
+
+# Convert to DataFrame for easy display
+df = pd.DataFrame(candidates)
+df['created_at'] = pd.to_datetime(df['created_at']).dt.date
+
+# List Selection
+selected_candidate_id = st.sidebar.radio(
+    "Select Candidate", 
+    options=df['id'].tolist(),
+    format_func=lambda x: f"{df[df['id']==x]['candidate_name'].values[0]} ({df[df['id']==x]['match_score'].values[0]}%)"
 )
 
-# Sidebar Logic
-with st.sidebar:
-    st.header("Filters")
-    try:
-        jobs = supabase.table("jobs").select("id, title").eq("status", "active").execute()
-        job_map = {j['title']: j['id'] for j in jobs.data}
-    except:
-        st.warning("Could not fetch jobs.")
-        st.stop()
-    
-    if not job_map:
-        st.warning("No jobs found.")
-        st.stop()
-        
-    selected_job = st.selectbox("Role", list(job_map.keys()))
-    job_id = job_map[selected_job]
-    
-    candidates = supabase.table("applications").select("id, match_score, candidates(name)").eq("job_id", job_id).order("match_score", desc=True).execute()
-    
-    if not candidates.data:
-        st.warning("No candidates.")
-        st.stop()
-        
-    cand_map = {f"{c['candidates']['name']} ({c['match_score']}%)": c['id'] for c in candidates.data}
-    selected_cand_label = st.radio("Select Candidate", list(cand_map.keys()))
-    app_id = cand_map[selected_cand_label]
+# Get the specific candidate object
+candidate = df[df['id'] == selected_candidate_id].iloc[0]
 
-# Fetch Data
-app_data = supabase.table("applications").select("*, candidates(*), jobs(title)").eq("id", app_id).single().execute()
-data = app_data.data
+# --- 2. MAIN DASHBOARD ---
 
-# Handle AI JSON
-ai_json = data.get('ai_analysis_json', {})
-if isinstance(ai_json, str): 
-    try:
-        ai_json = json.loads(ai_json)
-    except:
-        ai_json = {}
-
-# --- VISUAL REPORT ---
-
-# 1. Profile Header
-c1, c2 = st.columns([3, 1])
-with c1:
-    st.markdown(f"<h1>{data['candidates']['name']}</h1>", unsafe_allow_html=True)
-    st.markdown(f"### {data['jobs']['title']}")
-    st.caption(f"📧 {data['candidates']['email']}")
-
-with c2:
-    score = data['match_score']
-    color = "#10B981" if score >= 80 else "#F59E0B" if score >= 50 else "#EF4444"
-    st.markdown(f"""
-        <div style="background-color: {color}; padding: 20px; border-radius: 15px; text-align: center; color: white;">
-            <div style="font-size: 3rem; font-weight: 700;">{score}%</div>
-            <div>MATCH SCORE</div>
-        </div>
-    """, unsafe_allow_html=True)
+# Header Section
+col1, col2, col3 = st.columns([1, 2, 1])
+with col1:
+    score = candidate['match_score']
+    color = "green" if score > 80 else "orange" if score > 50 else "red"
+    st.markdown(f"## Score: :{color}[{score}%]")
+with col2:
+    st.header(candidate['candidate_name'])
+    st.caption(f"Applied: {candidate['created_at']} | Email: {candidate['candidate_email']}")
+with col3:
+    if candidate['red_flags'] and candidate['red_flags'] != "None":
+        st.error(f"🚩 {candidate['red_flags']}")
+    else:
+        st.success("✅ No Major Red Flags")
 
 st.divider()
 
-# 2. Executive Summary
-st.markdown("### 🤖 AI Executive Summary & Reasoning")
-summary_text = data.get('ai_summary', "No summary available.")
+# Two-Column Layout: Analysis vs. Interview
+left_col, right_col = st.columns(2)
 
-if "Logic:" in summary_text:
-    parts = summary_text.split("Logic:", 1)[1].split("\n", 1)
-    logic_part = parts[0]
-    summary_part = parts[1] if len(parts) > 1 else ""
-    with st.expander("👁️ View AI Reasoning (Chain of Thought)"):
-        st.write(logic_part.strip())
-    st.info(summary_part.strip())
-else:
-    st.info(summary_text)
+# --- LEFT COLUMN: THE RESUME ANALYSIS ---
+with left_col:
+    st.subheader("📄 AI Resume Analysis")
+    
+    with st.expander("Executive Summary", expanded=True):
+        st.write(candidate['summary'])
+    
+    with st.expander("Skills Identified"):
+        # Handle list or string format safely
+        skills = candidate['skills_found']
+        if isinstance(skills, str):
+            st.write(skills) # If it's just text
+        elif isinstance(skills, list):
+            st.markdown(" ".join([f"`{s}`" for s in skills]))
 
-# 3. Questionnaire Answers (New Feature Display)
-q_answers = data.get('questionnaire_answers')
-if q_answers:
-    with st.expander("📝 View Screening Questionnaire Answers"):
-        for q, a in q_answers.items():
-            st.markdown(f"**Q:** {q}")
-            st.write(f"**A:** {a}")
-            st.divider()
-
-# 4. Skills Visualization
-c1, c2 = st.columns(2)
-
-with c1:
-    st.markdown("### ✅ Skills Detected")
-    found = ai_json.get('skills_found', [])
-    if found:
-        for skill in found:
-            st.markdown(f"**{skill}**")
-            st.progress(100)
-    else:
-        st.write("No skills specifically extracted.")
-
-with c2:
-    st.markdown("### ⚠️ Critical Gaps")
-    missing = ai_json.get('missing_critical_skills', [])
+    st.markdown("###  Missing / Critical Gaps")
+    missing = candidate.get('missing_critical_skills')
     if missing:
-        for gap in missing:
-            st.error(f"Missing: {gap}")
-    else:
-        st.success("No critical gaps found!")
+        if isinstance(missing, list):
+            for m in missing:
+                st.warning(f"⚠️ Missing: {m}")
+        else:
+            st.warning(f"⚠️ {missing}")
 
-# 5. Red Flags & Suggestions
-flags = ai_json.get('red_flags', "None")
-suggested = ai_json.get('suggested_fit', None)
+# --- RIGHT COLUMN: THE INTERVIEW COPILOT ---
+with right_col:
+    st.subheader("📞 Interview Guide")
+    st.info("The AI generated these questions based on gaps in the resume.")
 
-if (flags and flags != "None") or suggested:
-    st.divider()
-    col_f, col_s = st.columns(2)
-    with col_f:
-        if flags and flags != "None":
-            st.markdown("### 🚩 Risk Assessment")
-            st.warning(flags)
-    with col_s:
-        if suggested:
-            st.markdown("### 💡 Career Path Suggestion")
-            st.info(f"**AI Recommendation:** {suggested}")
-
-st.divider()
-st.link_button("📄 Open Original Resume PDF", data['candidates']['resume_url'], use_container_width=True)
-
-# --- HUMAN INTERVENTION SECTION ---
-st.divider()
-st.subheader("✍️ Recruiter Feedback & Manual Override")
-
-with st.form("recruiter_feedback_form"):
-    c1, c2 = st.columns([3, 1])
-    with c1:
-        existing_notes = data.get('recruiter_notes', "")
-        new_notes = st.text_area("Internal Recruitment Notes", value=existing_notes, placeholder="Enter interview feedback...")
-    with c2:
-        existing_manual = data.get('manual_score')
-        new_score = st.number_input("Manual Score Override", min_value=0, max_value=100, value=int(existing_manual) if existing_manual is not None else int(data['match_score']))
+    # 1. DISPLAY GENERATED QUESTIONS
+    questions = candidate.get('suggested_questions')
     
-    if st.form_submit_button("💾 Save Feedback & Update Score"):
-        try:
-            supabase.table("applications").update({
-                "recruiter_notes": new_notes,
-                "manual_score": new_score,
-                "match_score": new_score
-            }).eq("id", app_id).execute()
-            st.success("Feedback saved!")
-            time.sleep(1)
-            st.rerun()
-        except Exception as e:
-            st.error(f"Failed to save: {e}")
+    if questions:
+        # Check if it's a list or string (JSON parsing safety)
+        if isinstance(questions, str):
+            try:
+                questions = json.loads(questions)
+            except:
+                questions = [questions] # Fallback if it's just raw text
+        
+        for i, q in enumerate(questions):
+            st.markdown(f"**Q{i+1}:** {q}")
+    else:
+        st.markdown("*No specific questions generated. (Run analysis again to generate)*")
+
+    st.divider()
+
+    # 2. INTERVIEW NOTES (INPUT)
+    st.write("📝 **Recruiter Notes**")
+    
+    # Pre-fill with existing notes if any
+    existing_notes = candidate.get('interview_notes') or ""
+    
+    with st.form("notes_form"):
+        new_notes = st.text_area("Record candidate's answers here...", value=existing_notes, height=200)
+        save_btn = st.form_submit_button("💾 Save Interview Notes")
+        
+        if save_btn:
+            try:
+                supabase.table("candidates").update({"interview_notes": new_notes}).eq("id", candidate['id']).execute()
+                st.success("Notes saved successfully!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error saving notes: {e}")
