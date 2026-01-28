@@ -21,7 +21,7 @@ def clean_text(text):
         text = text.replace(old, new)
     return text.encode('latin-1', 'replace').decode('latin-1')
 
-# --- PDF CLASS ---
+# --- PDF GENERATOR CLASS (Full Template) ---
 class MRF_PDF(FPDF):
     def header(self):
         self.set_font('Arial', 'B', 16)
@@ -38,74 +38,149 @@ class MRF_PDF(FPDF):
     def draw_form(self, data):
         self.add_page()
         self.set_font('Arial', '', 10)
-        # (Drawing logic same as before, abbreviated for brevity but fully functional)
+
+        # 1. OFFICIAL USE BOX
+        self.set_font('Arial', 'I', 8)
+        self.multi_cell(0, 5, "Note: This MRF is to be used for Non-exempt and Exempt positions only. Please complete thoroughly.\nAll MRFs must be approved by General Manager/Managing Director before submission to HR.", 1)
+        self.ln(2)
+
+        # 2. REQUISITOR
         self.section_title("REQUISITOR")
-        self.cell(40, 10, "Name:", border='LBT'); self.cell(150, 10, clean_text(data.get('requisitor_name')), border='RBT', ln=1)
-        self.cell(40, 10, "Department:", border='LBT'); self.cell(150, 10, clean_text(data.get('requisitor_dept')), border='RBT', ln=1)
+        self.set_font('Arial', '', 10)
+        self.cell(40, 10, "Name:", border='LBT')
+        self.cell(150, 10, clean_text(data.get('requisitor_name', '')), border='RBT', ln=1)
+        self.cell(40, 10, "Department:", border='LBT')
+        self.cell(80, 10, clean_text(data.get('requisitor_dept', '')), border='BT')
+        self.cell(30, 10, "Tel/Ext:", border='BT')
+        self.cell(40, 10, clean_text(data.get('requisitor_ext', '')), border='RBT', ln=1)
+        self.ln(2)
+
+        # 3. MANPOWER REQUIRED
+        self.section_title("MANPOWER REQUIRED")
+        self.cell(40, 10, "Job Title:", border='LBT')
+        self.cell(80, 10, clean_text(data.get('job_title', '')), border='BT')
+        self.cell(20, 10, "Shift:", border='BT')
+        self.cell(50, 10, clean_text(data.get('shift', '')), border='RBT', ln=1)
+        self.cell(40, 10, "Number Required:", border='LBT')
+        self.cell(80, 10, str(data.get('number_required', '')), border='BT')
+        self.cell(30, 10, "Date Required:", border='BT')
+        self.cell(40, 10, str(data.get('date_required', '')), border='RBT', ln=1)
+        self.ln(2)
+
+        # 4. CLASSIFICATION
+        self.section_title("CLASSIFICATION")
+        rtype = clean_text(data.get('recruitment_type', ''))
+        self.cell(10, 8, "(A)", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Additional' in rtype else ' '}] Additional Position", 0, 0)
+        self.cell(60, 8, f"[{'X' if 'Replacement' in rtype else ' '}] Replacement", 0, 0)
+        self.cell(0, 8, f"Reason: {clean_text(data.get('replacement_reason', 'N/A'))}", 0, 1)
+
+        enature = clean_text(data.get('employment_nature', ''))
+        self.cell(10, 8, "(B)", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Full-time' in enature else ' '}] Full-time", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Part-time' in enature else ' '}] Part-time", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Contract' in enature else ' '}] Contract", 0, 1)
+
+        src = clean_text(data.get('hiring_source', ''))
+        self.cell(10, 8, "(C)", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Within' in src else ' '}] Within Company", 0, 0)
+        self.cell(50, 8, f"[{'X' if 'Outside' in src else ' '}] Outside", 0, 1)
+        self.ln(2)
+
+        # 5. REQUIREMENTS
+        self.section_title("QUALIFICATIONS REQUIRED")
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Education:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('education_req', '')), 1)
         
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Skills:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('skills_req', '')), 1)
+        
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Experience:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('experience_req', '')), 1)
         self.ln(2)
-        self.section_title("POSITION DETAILS")
-        self.cell(40, 10, "Job Title:", border='LBT'); self.cell(150, 10, clean_text(data.get('job_title')), border='RBT', ln=1)
-        self.cell(40, 10, "No. Required:", border='LBT'); self.cell(150, 10, str(data.get('number_required')), border='RBT', ln=1)
 
-        self.ln(2)
-        self.section_title("APPROVALS REQUIRED")
-        self.ln(15)
-        self.cell(60, 5, "Requisitor", 0, 0, 'C'); self.cell(60, 5, "General Manager", 0, 0, 'C'); self.cell(60, 5, "Managing Director", 0, 1, 'C')
+        # 6. RESPONSIBILITIES
+        self.section_title("AREAS OF RESPONSIBILITY")
+        self.set_font('Arial', '', 9)
+        self.multi_cell(0, 6, clean_text(data.get('responsibilities', '')), 1)
+        self.ln(5)
 
-# --- MAIN PAGE ---
-hero_section("assets/login_hero.jpg", "Draft MRF", "Step 1: Draft the requisition and download the form.")
+        # 7. APPROVALS
+        self.section_title("APPROVALS")
+        self.ln(15) 
+        y = self.get_y()
+        self.line(10, y, 70, y); self.line(80, y, 140, y); self.line(150, y, 200, y)
+        self.cell(60, 5, "Requisitor Signature", 0, 0, 'C')
+        self.cell(10, 5, "", 0, 0)
+        self.cell(60, 5, "General Manager", 0, 0, 'C')
+        self.cell(10, 5, "", 0, 0)
+        self.cell(50, 5, "Managing Director", 0, 1, 'C')
 
-st.subheader("📝 Draft New Requisition")
+# --- MAIN FORM LOGIC ---
+hero_section("assets/login_hero.jpg", "Create Requisition", "Step 1: Fill details & Download PDF.")
 
-with st.form("draft_mrf_form"):
-    c1, c2 = st.columns(2)
+st.subheader("📝 New Manpower Requisition")
+
+with st.form("new_mrf_form"):
+    st.markdown("### 🏢 Requisitor Info")
+    c1, c2, c3 = st.columns(3)
     req_name = c1.text_input("Requisitor Name")
     req_dept = c2.text_input("Department")
-    
-    r1, r2, r3 = st.columns(3)
+    req_ext  = c3.text_input("Tel / Ext")
+
+    st.markdown("### 👷 Position Details")
+    r1, r2, r3, r4 = st.columns(4)
     job_title = r1.text_input("Job Title")
-    num_req   = r2.number_input("Count", min_value=1, value=1)
-    date_req  = r3.date_input("Date Required")
+    shift     = r2.text_input("Shift", value="Day")
+    num_req   = r3.number_input("No. Required", min_value=1, value=1)
+    date_req  = r4.date_input("Date Required")
 
-    st.markdown("### Requirements")
-    skills_req = st.text_area("Skills & Justification")
+    st.markdown("### ✅ Classification")
+    cl1, cl2 = st.columns(2)
+    with cl1:
+        rec_type = st.radio("Recruitment Type", ["Additional Position", "Replacement"])
+        rep_reason = st.text_input("If Replacement, Reason:") if rec_type == "Replacement" else None
+    with cl2:
+        emp_nature = st.radio("Employment Nature", ["Full-time", "Part-time", "Contract"])
+        source     = st.radio("Source", ["Within", "Outside", "Both"])
 
-    submitted = st.form_submit_button("💾 Save Draft & Generate PDF")
+    st.markdown("### 🎓 Requirements")
+    edu_req    = st.text_area("Education Required")
+    skills_req = st.text_area("Skills Required")
+    exp_req    = st.text_area("Experience Required")
+    resp       = st.text_area("Key Responsibilities", height=150)
+    
+    submitted_draft = st.form_submit_button("💾 Save Draft & Generate PDF")
 
-if submitted:
-    if not job_title or not req_name:
-        st.error("Please fill in Job Title and Requisitor Name.")
-    else:
-        # 1. Prepare Data
-        mrf_data = {
-            "requisitor_name": req_name, "requisitor_dept": req_dept,
-            "job_title": job_title, "number_required": num_req, 
-            "date_required": str(date_req), "skills_req": skills_req,
-            "status": "Draft" # <--- SAVED AS DRAFT
-        }
-
-        # 2. Insert into DB
-        try:
-            supabase.table("requisitions").insert(mrf_data).execute()
-            
-            # 3. Generate PDF
-            pdf = MRF_PDF()
-            pdf.draw_form(mrf_data)
-            pdf_bytes = bytes(pdf.output(dest='S'))
-
-            st.success("✅ Draft Saved! You can now download the PDF.")
-            
-            # 4. Show Download Button (This will stay visible)
-            st.download_button(
-                label="⬇️ Download PDF to Sign",
-                data=pdf_bytes,
-                file_name=f"Draft_MRF_{job_title}.pdf",
-                mime="application/pdf",
-                type="primary"
-            )
-            
-            st.info("👉 **Next Step:** Print this, sign it, and go to the **'Submit MRF'** page to upload it.")
-            
-        except Exception as e:
-            st.error(f"Database Error: {e}")
+if submitted_draft:
+    mrf_data = {
+        "requisitor_name": req_name, "requisitor_dept": req_dept, "requisitor_ext": req_ext,
+        "job_title": job_title, "shift": shift, "number_required": num_req, "date_required": str(date_req),
+        "recruitment_type": rec_type, "replacement_reason": rep_reason,
+        "employment_nature": emp_nature, "hiring_source": source,
+        "education_req": edu_req, "skills_req": skills_req, "experience_req": exp_req,
+        "responsibilities": resp,
+        "status": "Draft"
+    }
+    
+    try:
+        # Save Draft to DB
+        supabase.table("requisitions").insert(mrf_data).execute()
+        
+        # Generate PDF
+        pdf = MRF_PDF()
+        pdf.draw_form(mrf_data)
+        pdf_bytes = bytes(pdf.output(dest='S'))
+        
+        st.success("✅ Saved! Download below.")
+        st.download_button(
+            label="⬇️ Download PDF Template",
+            data=pdf_bytes,
+            file_name=f"MRF_{job_title}.pdf",
+            mime="application/pdf",
+            type="primary"
+        )
+        st.info("👉 Once signed, go to **Submit Signed MRF** to upload it.")
+        
+    except Exception as e:
+        st.error(f"Error: {e}")

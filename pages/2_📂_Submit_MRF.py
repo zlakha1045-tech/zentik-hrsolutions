@@ -15,67 +15,88 @@ except:
     st.stop()
 
 st.title("📂 Submit Signed Requisition")
-st.markdown("Step 2: Upload the signed PDF to send it for management approval.")
+st.markdown("Upload your signed MRF here. You can link it to a previous draft or create a new submission.")
 
-# --- 1. FETCH DRAFTS ---
+# --- 1. SELECTION LOGIC ---
+c_sel, c_or = st.columns([3, 1])
+
+# Fetch Drafts for the dropdown
 try:
-    # Only get drafts
     drafts = supabase.table("requisitions").select("*").eq("status", "Draft").execute().data
-except Exception as e:
-    st.error(f"Connection Error: {e}")
-    st.stop()
+except:
+    drafts = []
 
-if not drafts:
-    st.info("✅ No pending drafts found. Go to 'Create Requisition' to start one.")
-    st.stop()
+draft_options = {f"{d['job_title']} (Req: {d['requisitor_name']})": d for d in drafts}
+draft_options["-- Create New / No Draft --"] = None
 
-# --- 2. SELECT DRAFT ---
-draft_map = {f"{d['job_title']} (Req: {d['requisitor_name']})": d for d in drafts}
-selected_label = st.selectbox("Select Draft to Submit", list(draft_map.keys()))
-selected_draft = draft_map[selected_label]
+selected_label = st.selectbox("Link to Draft (Optional)", list(draft_options.keys()))
+selected_draft = draft_options[selected_label]
 
+# --- 2. DETAILS INPUT ---
+# If a draft is selected, we autofill. If not, user types it in.
 st.divider()
 
-# --- 3. UPLOAD & PREVIEW ---
+if selected_draft:
+    st.info(f"🔗 Linking to Draft ID: {selected_draft['id']}")
+    job_title_input = st.text_input("Job Title", value=selected_draft['job_title'], disabled=True)
+    req_id = selected_draft['id']
+else:
+    st.warning("📝 Creating a fresh submission (No draft linked).")
+    job_title_input = st.text_input("Job Title", placeholder="e.g. Senior Accountant")
+    req_id = None
+
+# --- 3. UPLOAD & SUBMIT ---
 c1, c2 = st.columns([1, 1])
 
 with c1:
-    st.subheader("📤 Upload Signed Document")
-    uploaded_file = st.file_uploader("Upload PDF/Image", type=["pdf", "png", "jpg"])
+    st.subheader("📤 Upload Document")
+    uploaded_file = st.file_uploader("Upload Signed PDF/Image", type=["pdf", "png", "jpg"])
 
     if uploaded_file:
-        # PREVIEW LOGIC
-        st.markdown("### 👁️ Document Preview")
+        st.markdown("### 👁️ Preview")
         if uploaded_file.type == "application/pdf":
-            # PDF Preview using base64 embedding
             base64_pdf = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
             pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
             st.markdown(pdf_display, unsafe_allow_html=True)
         else:
-            # Image Preview
             st.image(uploaded_file, use_container_width=True)
 
 with c2:
-    st.subheader("🚀 Finalize")
-    st.info(f"You are submitting **{selected_draft['job_title']}** for approval.")
+    st.subheader("🚀 Finalize Submission")
     
-    if st.button("Submit for Approval", type="primary", disabled=(not uploaded_file)):
-        if uploaded_file:
+    if st.button("Submit for Approval", type="primary"):
+        if not uploaded_file:
+            st.error("Please upload a file.")
+        elif not job_title_input:
+            st.error("Job Title is required.")
+        else:
             try:
-                with st.spinner("Uploading file..."):
+                with st.spinner("Uploading & Submitting..."):
                     # 1. Upload File
                     file_ext = uploaded_file.name.split('.')[-1]
-                    path = f"requisitions/{selected_draft['id']}_signed.{file_ext}"
+                    # Use timestamp if no ID to prevent overwriting
+                    unique_id = req_id if req_id else int(time.time())
+                    path = f"requisitions/{unique_id}_signed.{file_ext}"
                     mime = mimetypes.guess_type(uploaded_file.name)[0]
                     
                     supabase.storage.from_("resumes").upload(path, uploaded_file.getvalue(), {"content-type": mime})
                     url = supabase.storage.from_("resumes").get_public_url(path)
 
-                    # 2. Update DB (Status -> Pending Approval)
-                    supabase.table("requisitions").update({
-                        "status": "Pending Approval",
-                        "signed_mrf_url": url
-                    }).eq("id", selected_draft['id']).execute()
+                    if req_id:
+                        # UPDATE EXISTING DRAFT
+                        supabase.table("requisitions").update({
+                            "status": "Pending Approval",
+                            "signed_mrf_url": url
+                        }).eq("id", req_id).execute()
+                    else:
+                        # INSERT NEW ENTRY (Since no draft existed)
+                        supabase.table("requisitions").insert({
+                            "job_title": job_title_input,
+                            "requisitor_name": "Uploaded Manually",
+                            "status": "Pending Approval",
+                            "signed_mrf_url": url,
+                            "number_required": 1 # Default
+                        }).execute()
 
                     st.balloons()
                     st.success("Submitted! Sent to Management Inbox.")
