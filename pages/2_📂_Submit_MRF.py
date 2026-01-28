@@ -1,7 +1,6 @@
 import streamlit as st
 from supabase import create_client
 from styles import load_css
-import base64
 import time
 import mimetypes
 
@@ -27,6 +26,7 @@ except:
     drafts = []
 
 draft_options = {f"{d['job_title']} (Req: {d['requisitor_name']})": d for d in drafts}
+# Add option for Manual Upload
 draft_options["-- Create New / No Draft --"] = None
 
 selected_label = st.selectbox("Link to Draft (Optional)", list(draft_options.keys()))
@@ -54,11 +54,19 @@ with c1:
 
     if uploaded_file:
         st.markdown("### 👁️ Preview")
+        
+        # FIX: "Blocked by Chrome" Issue
         if uploaded_file.type == "application/pdf":
-            base64_pdf = base64.b64encode(uploaded_file.getvalue()).decode('utf-8')
-            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="500" type="application/pdf"></iframe>'
-            st.markdown(pdf_display, unsafe_allow_html=True)
+            # Instead of iframe, we provide a button to view it
+            st.info("📄 PDF detected.")
+            st.download_button(
+                "⬇️ Download to View/Verify", 
+                uploaded_file, 
+                file_name="preview.pdf",
+                mime="application/pdf"
+            )
         else:
+            # Images are safe to preview directly
             st.image(uploaded_file, use_container_width=True)
 
 with c2:
