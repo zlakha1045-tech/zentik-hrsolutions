@@ -2,77 +2,80 @@ import streamlit as st
 from supabase import create_client
 import requests
 import mimetypes
-import time
-from styles import load_css, hero_section
 
-st.set_page_config(page_title="Upload Center", layout="wide")
-load_css()
-supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
+# --- SETUP ---
+st.set_page_config(page_title="Upload Center", layout="centered")
 
-# Hero Image
-hero_section(
-    "assets/upload_hero.jpg",
-    "Upload Center",
-    "Bulk process resumes with our AI Engine"
-)
-
-# Instructions
-with st.expander("ℹ️ How to use this tool"):
-    st.write("1. Select the Job Opening you are hiring for.")
-    st.write("2. Drag and drop up to 20 PDF resumes.")
-    st.write("3. The AI will analyze skills, extracting names and emails automatically.")
-
-# Fetch Jobs
 try:
-    jobs_response = supabase.table("jobs").select("id, title").eq("status", "active").execute()
-    job_options = {job['title']: job['id'] for job in jobs_response.data}
+    supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 except:
-    job_options = {}
-
-if not job_options:
-    st.error("Please create a job in **Job Manager** first.")
+    st.error("Missing Supabase Secrets.")
     st.stop()
 
-# Styled Selection Box
-c1, c2 = st.columns([1, 2])
-with c1:
-    selected_job_name = st.selectbox("🎯 Target Role", list(job_options.keys()))
-selected_job_id = job_options[selected_job_name]
+st.title("📂 Resume Upload Center")
+st.markdown("Upload resumes in **PDF, Word, Text, or Image** formats for AI Analysis.")
 
-# Uploader
-if 'upload_key' not in st.session_state: st.session_state.upload_key = 0
-uploaded_files = st.file_uploader("Drop PDFs here", type=["pdf"], accept_multiple_files=True, key=f"key_{st.session_state.upload_key}")
+# --- 1. JOB SELECTION ---
+# We need to know which job this resume is for
+try:
+    jobs = supabase.table("jobs").select("id, title, status").eq("status", "Active").execute()
+    # Create a dictionary: {"Sales Manager": "ID-123", ...}
+    job_map = {j['title']: j['id'] for j in jobs.data}
+except:
+    job_map = {}
 
-if st.button("🚀 Analyze Candidates", type="primary"):
-    if uploaded_files:
-        progress_bar = st.progress(0, text="Initializing AI...")
+if not job_map:
+    st.warning("No active jobs found. Please create a job in the Job Manager first.")
+    st.stop()
+
+selected_job_title = st.selectbox("Select Role", list(job_map.keys()))
+selected_job_id = job_map[selected_job_title]
+
+# --- 2. MULTI-FORMAT UPLOADER ---
+# Updated to accept docx, txt, and images
+uploaded_file = st.file_uploader(
+    "Drag & drop resume here", 
+    type=["pdf", "docx", "txt", "png", "jpg", "jpeg"]
+)
+
+# --- 3. SUBMISSION LOGIC ---
+if st.button("🚀 Analyze Candidate", type="primary"):
+    if uploaded_file and selected_job_id:
         
-        for i, file in enumerate(uploaded_files):
+        with st.spinner("Uploading and Analyzing... This may take a moment."):
             try:
-                # Upload logic
-                file_bytes = file.getvalue()
-                path = f"{int(time.time())}_{file.name}"
-                content_type = mimetypes.guess_type(file.name)[0] or "application/pdf"
-                
-                supabase.storage.from_("resumes").upload(path=path, file=file_bytes, file_options={"content-type": content_type, "upsert": "true"})
-                public_url = supabase.storage.from_("resumes").get_public_url(path)
-
-                payload = {
-                    "job_id": selected_job_id, 
-                    "candidate_name": "AI_Scanning...", 
-                    "candidate_email": "pending_extraction",
-                    "resume_url": public_url
+                # 1. Prepare Payload
+                # We send the file AND the job_id so n8n knows what requirements to match
+                files = {
+                    'resume': (
+                        uploaded_file.name, 
+                        uploaded_file.getvalue(), 
+                        uploaded_file.type or mimetypes.guess_type(uploaded_file.name)[0]
+                    )
                 }
-                requests.post(st.secrets["n8n"]["webhook_url"], json=payload)
                 
-            except Exception as e:
-                st.error(f"Error: {e}")
-            
-            progress_bar.progress((i + 1) / len(uploaded_files), text=f"Analyzing {file.name}...")
+                data = {
+                    'job_id': selected_job_id
+                }
 
-        time.sleep(1)
-        st.session_state.upload_key += 1
-        st.success("✅ Batch processing complete!")
-        st.balloons()
-        time.sleep(2)
-        st.rerun()
+                # 2. Send to n8n Webhook
+                webhook_url = st.secrets["n8n"]["webhook_url"]
+                response = requests.post(webhook_url, files=files, data=data)
+
+                # 3. Handle Response
+                if response.status_code == 200:
+                    st.success(f"✅ Analysis Complete! Candidate sent to {selected_job_title} pipeline.")
+                    st.balloons()
+                    
+                    # Optional: Show a link to view the result immediately
+                    # We can't link directly to the specific candidate easily without the ID returned, 
+                    # but we can redirect to the analysis page.
+                    if st.button("View Analysis Now"):
+                        st.switch_page("pages/Candidate_Analysis.py")
+                else:
+                    st.error(f"Analysis Failed. Error: {response.text}")
+
+            except Exception as e:
+                st.error(f"Connection Error: {e}")
+    else:
+        st.warning("Please select a job and upload a file.")
