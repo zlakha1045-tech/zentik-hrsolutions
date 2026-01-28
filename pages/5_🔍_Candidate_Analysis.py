@@ -2,6 +2,7 @@ import streamlit as st
 from supabase import create_client
 import pandas as pd
 import json
+import time
 
 # --- SETUP ---
 st.set_page_config(page_title="Candidate Analysis", layout="wide")
@@ -182,25 +183,29 @@ with tab_actions:
     c1, c2, c3 = st.columns(3)
     with c1:
         if not is_hired:
-            if st.button("🚀 Hire / Move to Placement", use_container_width=True, type="primary"):
-                # Update Candidate Status
-                supabase.table("candidates").update({"status": "Pending Hire"}).eq("id", candidate['id']).execute()
+            # CHANGED LABEL AND LOGIC
+            if st.button("✨ Request Hiring Approval", use_container_width=True, type="primary"):
                 
-                # Insert into Placements
+                # 1. Update Candidate Status
+                supabase.table("candidates").update({"status": "Pending Final Approval"}).eq("id", candidate['id']).execute()
+                
+                # 2. Create Placement Record (The Buffer Entry)
+                # We save the 'interview_notes' into the placement justification for easy reading later
                 job_id = candidate.get('job_id')
                 placement_data = {
                     "candidate_id": candidate['id'],
                     "job_id": job_id,
-                    "status": "Pending Hire",
-                    "salary_offered": "Pending"
+                    "status": "Pending Final Approval",
+                    "justification": candidate.get('interview_notes', 'No specific notes provided.') 
                 }
                 supabase.table("placements").insert(placement_data).execute()
                 
                 st.balloons()
-                st.success("Moved to Placement Manager!")
+                st.success("Candidate sent to Management for Final Approval!")
+                time.sleep(2)
                 st.rerun()
         else:
-            st.success(f"Status: {status} ✅")
+            st.success(f"Current Status: {status}")
 
     with c2:
         if st.button("🚫 Reject", use_container_width=True):
