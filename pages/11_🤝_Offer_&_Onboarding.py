@@ -4,7 +4,8 @@ from styles import load_css, hero_section
 import time
 import mimetypes
 from fpdf import FPDF
-from streamlit_pdf_viewer import pdf_viewer  # <--- NEW LIBRARY
+import base64
+import streamlit.components.v1 as components # Native HTML renderer
 
 st.set_page_config(page_title="Placement Manager", layout="wide")
 load_css()
@@ -16,14 +17,13 @@ except:
     st.error("Missing Supabase Secrets.")
     st.stop()
 
-# --- HELPER: GENERATE PDF OFFER ---
+# ==========================================
+# HELPER 1: GENERATE PDF (For Download)
+# ==========================================
 class OfferPDF(FPDF):
     def header(self):
-        # Force White Background
         self.set_fill_color(255, 255, 255)
         self.rect(0, 0, 210, 297, 'F')
-        
-        # Header Content
         self.set_font('Arial', 'B', 20)
         self.cell(0, 10, 'ZENTIK LABS', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
@@ -43,24 +43,11 @@ def create_offer_pdf(data):
     pdf.add_page()
     pdf.set_text_color(0, 0, 0)
     
-    # Date
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 10, f"Date: {data['date']}", 0, 1, 'R')
-    pdf.ln(5)
-
-    # To Address
-    pdf.set_font('Arial', 'B', 10)
-    pdf.cell(0, 5, f"To: {data['candidate_name']}", 0, 1)
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 5, f"Email: {data['candidate_email']}", 0, 1)
-    pdf.ln(10)
-
-    # Subject
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, 'SUBJECT: OFFER OF EMPLOYMENT', 0, 1, 'C')
-    pdf.ln(5)
-
-    # Body
+    pdf.set_font('Arial', '', 10); pdf.cell(0, 10, f"Date: {data['date']}", 0, 1, 'R'); pdf.ln(5)
+    pdf.set_font('Arial', 'B', 10); pdf.cell(0, 5, f"To: {data['candidate_name']}", 0, 1)
+    pdf.set_font('Arial', '', 10); pdf.cell(0, 5, f"Email: {data['candidate_email']}", 0, 1); pdf.ln(10)
+    pdf.set_font('Arial', 'B', 12); pdf.cell(0, 10, 'SUBJECT: OFFER OF EMPLOYMENT', 0, 1, 'C'); pdf.ln(5)
+    
     pdf.set_font('Arial', '', 11)
     body_text = (
         f"Dear {data['candidate_name'].split()[0]},\n\n"
@@ -69,42 +56,63 @@ def create_offer_pdf(data):
         "Terms of Employment:"
     )
     pdf.multi_cell(0, 6, body_text)
-    
-    # Bullets
     pdf.ln(2)
-    bullets = [
-        f"Start Date: {data['start_date']}",
-        f"Annual Salary: {data['salary']}",
-        f"Reporting To: {data['manager']}",
-        f"Probation Period: {data['probation']} Months"
-    ]
+    bullets = [f"Start Date: {data['start_date']}", f"Annual Salary: {data['salary']}", f"Reporting To: {data['manager']}", f"Probation Period: {data['probation']} Months"]
     for b in bullets:
-        pdf.cell(10) # Indent
-        pdf.cell(0, 6, f"- {b}", 0, 1)
+        pdf.cell(10); pdf.cell(0, 6, f"- {b}", 0, 1)
     
-    # Closing
-    pdf.ln(5)
-    pdf.multi_cell(0, 6, "\nPlease sign and return the duplicate copy of this letter as a token of your acceptance.")
+    pdf.ln(5); pdf.multi_cell(0, 6, "\nPlease sign and return the duplicate copy of this letter as a token of your acceptance.")
+    pdf.ln(20); y_pos = pdf.get_y()
+    pdf.set_xy(10, y_pos); pdf.cell(90, 5, "Sincerely,", 0, 1); pdf.ln(15); pdf.cell(90, 5, "HR Manager", 0, 1); pdf.cell(90, 5, "Zentik Labs", 0, 1)
+    pdf.set_xy(110, y_pos); pdf.cell(90, 5, "Accepted By:", 0, 1); pdf.ln(15); pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    # Signatures
-    pdf.ln(20)
-    y_pos = pdf.get_y()
-    
-    # Left Signature
-    pdf.set_xy(10, y_pos)
-    pdf.cell(90, 5, "Sincerely,", 0, 1)
-    pdf.ln(15)
-    pdf.cell(90, 5, "HR Manager", 0, 1)
-    pdf.cell(90, 5, "Zentik Labs", 0, 1)
-    
-    # Right Signature
-    pdf.set_xy(110, y_pos)
-    pdf.cell(90, 5, "Accepted By:", 0, 1)
-    pdf.ln(15)
-    pdf.cell(90, 5, data['candidate_name'], 0, 1)
-    
-    # Return raw bytes for PDF Viewer
     return bytes(pdf.output())
+
+# ==========================================
+# HELPER 2: GENERATE HTML (For Preview)
+# ==========================================
+def generate_offer_html(data):
+    # This HTML mimics the PDF look perfectly
+    return f"""
+    <div style="font-family: Arial, sans-serif; padding: 40px; background: white; color: black; max-width: 800px; margin: auto; border: 1px solid #ccc; box-shadow: 0 4px 8px rgba(0,0,0,0.1);">
+        <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px; margin-bottom: 20px;">
+            <h1 style="margin: 0; color: #000;">ZENTIK LABS</h1>
+            <p style="margin: 5px 0 0; color: #666; font-style: italic;">Excellence in Technology Solutions</p>
+        </div>
+        
+        <p style="text-align: right;"><strong>Date:</strong> {data['date']}</p>
+        
+        <p><strong>To,</strong><br>{data['candidate_name']}<br>{data['candidate_email']}</p>
+        
+        <h3 style="text-align: center; margin-top: 30px; text-decoration: underline;">SUBJECT: OFFER OF EMPLOYMENT</h3>
+        
+        <p>Dear {data['candidate_name'].split()[0]},</p>
+        
+        <p>We are pleased to offer you the position of <strong>{data['job_title']}</strong> at Zentik Labs. 
+        We were impressed with your skills and believe you will be a valuable asset to our {data['department']} team.</p>
+        
+        <h4>Terms of Employment:</h4>
+        <ul style="line-height: 1.6;">
+            <li><strong>Start Date:</strong> {data['start_date']}</li>
+            <li><strong>Annual Salary:</strong> {data['salary']}</li>
+            <li><strong>Reporting To:</strong> {data['manager']}</li>
+            <li><strong>Probation Period:</strong> {data['probation']} Months</li>
+        </ul>
+        
+        <p>Please sign and return the duplicate copy of this letter as a token of your acceptance.</p>
+        
+        <div style="display: flex; justify-content: space-between; margin-top: 60px;">
+            <div>
+                <p>Sincerely,</p><br>
+                <strong>HR Manager</strong><br>Zentik Labs
+            </div>
+            <div>
+                <p>Accepted By:</p><br>
+                <strong>{data['candidate_name']}</strong>
+            </div>
+        </div>
+    </div>
+    """
 
 # --- UI START ---
 hero_section("assets/login_hero.jpg", "Placement & Offers", "Generate Offer Letters and Finalize Hires.")
@@ -134,7 +142,6 @@ with tab_draft:
 
         st.divider()
         
-        # FORM
         with st.form("offer_draft_form"):
             c1, c2 = st.columns(2)
             with c1:
@@ -144,9 +151,8 @@ with tab_draft:
                 start_date = st.date_input("Joining Date")
                 probation = st.number_input("Probation Period (Months)", value=3)
 
-            generate_btn = st.form_submit_button("👀 Create Offer PDF")
+            generate_btn = st.form_submit_button("👀 Preview Offer")
 
-        # LOGIC
         if generate_btn or st.session_state.offer_generated:
             st.session_state.offer_generated = True
             
@@ -162,15 +168,14 @@ with tab_draft:
                 "probation": probation
             }
             
-            # Generate PDF Bytes
-            pdf_bytes = create_offer_pdf(offer_data)
-            
-            # --- THE FIX: USE STREAMLIT-PDF-VIEWER ---
+            # 1. SHOW HTML PREVIEW (Safe & Fast)
             st.markdown("### 📄 Offer Letter Preview")
-            pdf_viewer(input=pdf_bytes, width=700)
-            # ----------------------------------------
+            html_content = generate_offer_html(offer_data)
+            components.html(html_content, height=600, scrolling=True)
+            
+            # 2. GENERATE PDF FOR DOWNLOAD
+            pdf_bytes = create_offer_pdf(offer_data)
 
-            # ACTION BUTTONS
             col_d1, col_d2 = st.columns(2)
             with col_d1:
                 st.download_button(
