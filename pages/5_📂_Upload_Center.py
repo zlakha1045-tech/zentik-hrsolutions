@@ -97,28 +97,33 @@ if uploaded_files:
                 supabase.storage.from_("resumes").upload(file_path, uploaded_file.getvalue(), {"content-type": mime})
                 resume_url = supabase.storage.from_("resumes").get_public_url(file_path)
 
-                # C. SAVE TO DB (With unique placeholder email)
-                # We use 'bulk_timestamp_index' to guarantee uniqueness for the constraint
-                final_email = f"bulk_{timestamp}_{i}@zentiklabs.com"
+                # C. SAVE TO DB
+                # Create the unique email to avoid blocks
+                final_email = f"processing_{timestamp}_{i}@zentiklabs.com"
 
                 cand_data = {
                     "job_id": selected_job['id'],
-                    "name": uploaded_file.name, # Use filename as temporary name
+                    "name": uploaded_file.name, 
                     "email": final_email,
                     "resume_url": resume_url,
                     "status": "AI Analysis in Progress"
                 }
-                supabase.table("candidates").insert(cand_data).execute()
+                
+                # --- CRITICAL CHANGE HERE ---
+                # 1. Execute the insert and capture the response data
+                response = supabase.table("candidates").insert(cand_data).execute()
+                
+                # 2. Extract the actual UUID ('id') from the database response
+                # Response.data is a list, so we take the first item [0]
+                new_row_id = response.data[0]['id'] 
 
-                # D. TRIGGER N8N WEBHOOK
+                # D. SEND TO N8N
                 payload = {
+                    "candidate_id": new_row_id,  # <--- We label it 'candidate_id' for n8n
                     "resume_text": resume_text,
                     "resume_url": resume_url,
-                    "job_id": selected_job['id'],
-                    "candidate_name": uploaded_file.name
+                    "job_id": selected_job['id']
                 }
-                
-                # We send the request but don't wait for the full AI analysis (Async behavior)
                 requests.post(N8N_WEBHOOK, json=payload)
                 
             except Exception as e:
