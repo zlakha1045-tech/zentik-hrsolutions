@@ -19,15 +19,14 @@ except:
 
 N8N_WEBHOOK = st.secrets["n8n"]["webhook_url"]
 
-# --- ROBUST TEXT EXTRACTION HELPERS ---
+# --- TEXT EXTRACTION HELPERS ---
 def read_pdf(file):
     text = ""
     try:
         with pdfplumber.open(file) as pdf:
             for page in pdf.pages:
                 extract = page.extract_text()
-                if extract: 
-                    text += extract + "\n"
+                if extract: text += extract + "\n"
     except Exception as e:
         return f"Error reading PDF: {e}"
     return text
@@ -40,21 +39,18 @@ def read_docx(file):
         return f"Error reading Word Doc: {e}"
 
 # --- MAIN APP UI ---
-hero_section("assets/login_hero.jpg", "Candidate Portal", "Upload resumes in bulk for AI-powered analysis.")
+hero_section("assets/login_hero.jpg", "Candidate Portal", "Fast-Track Bulk Upload.")
 
-st.subheader("📂 Bulk Resume Processor")
-st.markdown("Drop multiple resumes (PDF or Docx) below. ZentikLabs AI will process them all in a queue.")
+st.subheader("📂 Resume Upload")
 
 # 1. SELECT JOB
 try:
-    # Only fetch active jobs for candidates to apply to
     jobs = supabase.table("jobs").select("id, title, department").eq("status", "Active").execute().data
-except Exception as e:
-    st.error(f"Database connection failed: {e}")
+except:
     st.stop()
 
 if not jobs:
-    st.info("⚠️ No Active Jobs found. Please publish a job in the Job Manager first.")
+    st.info("⚠️ No Active Jobs found.")
     st.stop()
 
 job_map = {f"{j['title']} ({j['department']})": j for j in jobs}
@@ -63,22 +59,17 @@ selected_job = job_map[selected_label]
 
 st.divider()
 
-# 2. BULK UPLOAD SELECTION
-# Added: accept_multiple_files=True
-uploaded_files = st.file_uploader("Drag and drop resumes here", type=["pdf", "docx"], accept_multiple_files=True)
+# 2. BULK UPLOAD
+uploaded_files = st.file_uploader("Drag resumes here (PDF or Docx)", type=["pdf", "docx"], accept_multiple_files=True)
 
 if uploaded_files:
-    st.info(f"📋 {len(uploaded_files)} files selected for processing.")
-    
-    # 3. START ANALYSIS LOOP
-    if st.button("🚀 Analyze All Resumes", type="primary"):
+    if st.button(f"🚀 Fast-Process {len(uploaded_files)} Resumes", type="primary"):
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # Iterate through every uploaded file
+        # --- THE FAST LOOP ---
         for i, uploaded_file in enumerate(uploaded_files):
-            # Update status for the user
-            status_text.text(f"Processing ({i+1}/{len(uploaded_files)}): {uploaded_file.name}")
+            status_text.text(f"Uploading ({i+1}/{len(uploaded_files)}): {uploaded_file.name}")
             
             try:
                 # A. EXTRACT TEXT
@@ -87,68 +78,57 @@ if uploaded_files:
                 else:
                     resume_text = read_docx(uploaded_file)
                 
-                # B. UPLOAD TO STORAGE
+                # B. UPLOAD FILE
                 file_ext = uploaded_file.name.split('.')[-1]
                 timestamp = int(time.time())
-                # Using a unique path including index to avoid collisions in high-speed uploads
                 file_path = f"candidates/{selected_job['id']}/{timestamp}_{i}.{file_ext}"
                 mime = mimetypes.guess_type(uploaded_file.name)[0]
 
                 supabase.storage.from_("resumes").upload(file_path, uploaded_file.getvalue(), {"content-type": mime})
                 resume_url = supabase.storage.from_("resumes").get_public_url(file_path)
 
-                # C. SAVE TO DB
-                # Create the unique email to avoid blocks
+                # C. SAVE TO DB (Initial Status)
                 final_email = f"processing_{timestamp}_{i}@zentiklabs.com"
-
                 cand_data = {
                     "job_id": selected_job['id'],
                     "name": uploaded_file.name, 
                     "email": final_email,
                     "resume_url": resume_url,
-                    "status": "AI Analysis in Progress"
+                    "status": "AI Analysis in Progress" # <--- This is what you see in Dashboard
                 }
                 
-                # --- CRITICAL CHANGE HERE ---
-                # 1. Execute the insert and capture the response data
+                # Insert and get ID
                 response = supabase.table("candidates").insert(cand_data).execute()
-                
-                # 2. Extract the actual UUID ('id') from the database response
-                # Response.data is a list, so we take the first item [0]
-                new_row_id = response.data[0]['id'] 
+                new_row_id = response.data[0]['id']
 
-# D. SEND TO N8N
+                # D. TRIGGER N8N (FIRE AND FORGET)
+                # We do NOT wait for the response. We just send it.
                 payload = {
                     "candidate_id": new_row_id,
                     "resume_text": resume_text,
                     "resume_url": resume_url,
                     "job_id": selected_job['id']
                 }
-                requests.post(N8N_WEBHOOK, json=payload)
+                try:
+                    # timeout=1 ensures we don't hang if n8n is slow to acknowledge
+                    requests.post(N8N_WEBHOOK, json=payload, timeout=2) 
+                except requests.exceptions.ReadTimeout:
+                    pass # This is expected behavior for "Fire and Forget"
+                except Exception as e:
+                    print(f"Webhook error: {e}")
 
-                # --- NEW: WAIT FOR COMPLETION WITH SPINNER ---
-                with st.spinner(f"Creating AI Profile for {uploaded_file.name}..."):
-                    max_retries = 30 # Wait up to 60 seconds
-                    for _ in range(max_retries):
-                        time.sleep(2)
-                        # Check database for status change
-                        check = supabase.table("candidates").select("status").eq("id", new_row_id).execute()
-                        
-                        if check.data and check.data[0]['status'] != "AI Analysis in Progress":
-                            st.toast(f"✅ {uploaded_file.name} Analysis Complete!", icon="✨")
-                            break
-                    else:
-                        st.warning(f"⚠️ {uploaded_file.name} is taking longer than usual, but is processing in background.")
-                # ---------------------------------------------
-                
             except Exception as e:
-                st.error(f"❌ Failed to process {uploaded_file.name}: {e}")
+                st.error(f"❌ Error on {uploaded_file.name}: {e}")
             
-            # Update visual progress
+            # Update Bar
             progress_bar.progress((i + 1) / len(uploaded_files))
             
-        status_text.text("✅ Bulk Upload Complete!")
+        status_text.text("✅ Uploads Sent to AI Queue!")
         st.balloons()
-        st.success(f"Successfully processed {len(uploaded_files)} resumes!")
-        time.sleep(3)
-        st.rerun()
+        st.success(f"Sent {len(uploaded_files)} resumes to the AI Agent.")
+        
+        # Direct them to where the action is
+        st.info("👉 Head over to the **Analysis Dashboard** to watch the scores update in real-time!")
+        
+        time.sleep(2)
+        st.switch_page("6_🔍_Candidate_Analysis.py") # Auto-redirect to the dashboard

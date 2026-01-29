@@ -105,25 +105,6 @@ def load_css():
             .score-green { background: linear-gradient(135deg, #10B981 0%, #059669 100%); color: white; }
             .score-orange { background: linear-gradient(135deg, #F59E0B 0%, #D97706 100%); color: white; }
             .score-red { background: linear-gradient(135deg, #EF4444 0%, #B91C1C 100%); color: white; }
-
-            /* --- 5. CENTERED LOGIN CARD (New!) --- */
-            .login-container {
-                background: rgba(15, 23, 42, 0.6);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 20px;
-                padding: 40px;
-                text-align: center;
-                backdrop-filter: blur(12px);
-                box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
-                margin-top: 50px;
-            }
-            .login-container img {
-                margin-bottom: 20px;
-                display: block;
-                margin-left: auto;
-                margin-right: auto;
-            }
-
         </style>
     """, unsafe_allow_html=True)
 
