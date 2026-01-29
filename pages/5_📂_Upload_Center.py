@@ -117,14 +117,29 @@ if uploaded_files:
                 # Response.data is a list, so we take the first item [0]
                 new_row_id = response.data[0]['id'] 
 
-                # D. SEND TO N8N
+# D. SEND TO N8N
                 payload = {
-                    "candidate_id": new_row_id,  # <--- We label it 'candidate_id' for n8n
+                    "candidate_id": new_row_id,
                     "resume_text": resume_text,
                     "resume_url": resume_url,
                     "job_id": selected_job['id']
                 }
                 requests.post(N8N_WEBHOOK, json=payload)
+
+                # --- NEW: WAIT FOR COMPLETION WITH SPINNER ---
+                with st.spinner(f"Creating AI Profile for {uploaded_file.name}..."):
+                    max_retries = 30 # Wait up to 60 seconds
+                    for _ in range(max_retries):
+                        time.sleep(2)
+                        # Check database for status change
+                        check = supabase.table("candidates").select("status").eq("id", new_row_id).execute()
+                        
+                        if check.data and check.data[0]['status'] != "AI Analysis in Progress":
+                            st.toast(f"✅ {uploaded_file.name} Analysis Complete!", icon="✨")
+                            break
+                    else:
+                        st.warning(f"⚠️ {uploaded_file.name} is taking longer than usual, but is processing in background.")
+                # ---------------------------------------------
                 
             except Exception as e:
                 st.error(f"❌ Failed to process {uploaded_file.name}: {e}")
@@ -134,6 +149,6 @@ if uploaded_files:
             
         status_text.text("✅ Bulk Upload Complete!")
         st.balloons()
-        st.success(f"Successfully sent {len(uploaded_files)} resumes for AI analysis. You can monitor progress in the 'Candidate Analysis' page.")
+        st.success(f"Successfully processed {len(uploaded_files)} resumes!")
         time.sleep(3)
         st.rerun()
