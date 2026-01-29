@@ -98,8 +98,7 @@ def create_offer_pdf(data):
     pdf.ln(15)
     pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    # --- THE FIX IS HERE ---
-    # fpdf2 returns a bytearray directly. We cast it to bytes just to be safe.
+    # FIX: Return raw bytes correctly for fpdf2
     return bytes(pdf.output())
 
 # --- UI START ---
@@ -122,7 +121,7 @@ with tab_draft:
     if not pending_list:
         st.info("✅ No new offers to generate.")
     else:
-        # Initialize Session State for this form
+        # Initialize Session State
         if 'offer_generated' not in st.session_state:
             st.session_state.offer_generated = False
         
@@ -144,29 +143,28 @@ with tab_draft:
 
             generate_btn = st.form_submit_button("👀 Create Offer PDF")
 
-        # LOGIC: If button clicked OR state is already True
+        # LOGIC
         if generate_btn or st.session_state.offer_generated:
-            st.session_state.offer_generated = True # KEEP IT TRUE
+            st.session_state.offer_generated = True
             
-            # Prepare Data
             offer_data = {
                 "date": str(time.strftime("%Y-%m-%d")),
                 "candidate_name": p_data['candidates']['name'],
                 "candidate_email": p_data['candidates']['email'],
                 "job_title": p_data['jobs']['title'],
                 "department": p_data['jobs'].get('department', 'General'),
-                "salary": salary if salary else "TBD", # Handle empty state on reload
+                "salary": salary if salary else "TBD",
                 "start_date": str(start_date),
                 "manager": manager if manager else "Hiring Manager",
                 "probation": probation
             }
             
-            # Generate PDF Bytes
+            # Generate PDF
             pdf_bytes = create_offer_pdf(offer_data)
-            
-            # Show PDF Preview (Embedded)
             base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
-            pdf_display = f'<iframe src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf"></iframe>'
+            
+            # FIX: Use <embed> tag instead of <iframe> to bypass Chrome blocks
+            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf">'
             st.markdown(pdf_display, unsafe_allow_html=True)
             
             # ACTION BUTTONS
@@ -181,14 +179,12 @@ with tab_draft:
             
             with col_d2:
                 if st.button("✉️ Mark as Sent (Wait for Signature)", type="primary"):
-                    # Update DB
                     supabase.table("placements").update({
                         "status": "Offer Sent",
                         "salary_offered": offer_data['salary'],
                         "start_date": offer_data['start_date']
                     }).eq("id", p_data['id']).execute()
                     
-                    # Reset State and Rerun
                     st.session_state.offer_generated = False
                     st.success("Status Updated! Moving candidate to 'Finalize Hire' tab.")
                     time.sleep(1.5)
