@@ -19,6 +19,12 @@ except:
 # --- HELPER: GENERATE PDF OFFER ---
 class OfferPDF(FPDF):
     def header(self):
+        # --- FIX 1: FORCE SOLID WHITE BACKGROUND ---
+        # This prevents the "Black text on dark background" issue
+        self.set_fill_color(255, 255, 255)
+        self.rect(0, 0, 210, 297, 'F')
+        
+        # Standard Header
         self.set_font('Arial', 'B', 20)
         self.cell(0, 10, 'ZENTIK LABS', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
@@ -98,7 +104,7 @@ def create_offer_pdf(data):
     pdf.ln(15)
     pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    # FIX: Return raw bytes correctly for fpdf2
+    # Returns raw bytes (Compatible with fpdf2)
     return bytes(pdf.output())
 
 # --- UI START ---
@@ -121,7 +127,7 @@ with tab_draft:
     if not pending_list:
         st.info("✅ No new offers to generate.")
     else:
-        # Initialize Session State
+        # Session State to keep the buttons alive after download
         if 'offer_generated' not in st.session_state:
             st.session_state.offer_generated = False
         
@@ -163,8 +169,8 @@ with tab_draft:
             pdf_bytes = create_offer_pdf(offer_data)
             base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
             
-            # FIX: Use <embed> tag instead of <iframe> to bypass Chrome blocks
-            pdf_display = f'<embed src="data:application/pdf;base64,{base64_pdf}" width="100%" height="600" type="application/pdf">'
+            # --- FIX 2: Use <object> tag instead of <embed> ---
+            pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="600px"><p>Your browser does not support PDF previews.</p></object>'
             st.markdown(pdf_display, unsafe_allow_html=True)
             
             # ACTION BUTTONS
