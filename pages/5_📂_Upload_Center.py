@@ -19,7 +19,7 @@ except:
 
 N8N_WEBHOOK = st.secrets["n8n"]["webhook_url"]
 
-# --- TEXT EXTRACTION HELPERS ---
+# --- IMPROVED TEXT EXTRACTION ---
 def read_pdf(file):
     text = ""
     try:
@@ -32,9 +32,25 @@ def read_pdf(file):
     return text
 
 def read_docx(file):
+    """
+    Extracts text from Paragraphs AND Tables (Crucial for Resumes)
+    """
     try:
         doc = docx.Document(file)
-        return "\n".join([para.text for para in doc.paragraphs])
+        full_text = []
+        
+        # 1. Extract Paragraphs
+        for para in doc.paragraphs:
+            full_text.append(para.text)
+            
+        # 2. Extract Tables (Resumes often use hidden tables for layout)
+        for table in doc.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    for para in cell.paragraphs:
+                        full_text.append(para.text)
+                        
+        return "\n".join(full_text)
     except Exception as e:
         return f"Error reading Word Doc: {e}"
 
@@ -67,18 +83,18 @@ if uploaded_files:
         progress_bar = st.progress(0)
         status_text = st.empty()
         
-        # --- THE FAST LOOP ---
+        # --- A. UPLOAD LOOP (Fast) ---
         for i, uploaded_file in enumerate(uploaded_files):
-            status_text.text(f"Uploading ({i+1}/{len(uploaded_files)}): {uploaded_file.name}")
+            status_text.markdown(f"**Uploading ({i+1}/{len(uploaded_files)}):** `{uploaded_file.name}`")
             
             try:
-                # A. EXTRACT TEXT
+                # 1. EXTRACT TEXT (Now handles Tables in Docx)
                 if uploaded_file.name.lower().endswith(".pdf"):
                     resume_text = read_pdf(uploaded_file)
                 else:
                     resume_text = read_docx(uploaded_file)
                 
-                # B. UPLOAD FILE
+                # 2. UPLOAD FILE TO STORAGE
                 file_ext = uploaded_file.name.split('.')[-1]
                 timestamp = int(time.time())
                 file_path = f"candidates/{selected_job['id']}/{timestamp}_{i}.{file_ext}"
@@ -87,48 +103,53 @@ if uploaded_files:
                 supabase.storage.from_("resumes").upload(file_path, uploaded_file.getvalue(), {"content-type": mime})
                 resume_url = supabase.storage.from_("resumes").get_public_url(file_path)
 
-                # C. SAVE TO DB (Initial Status)
+                # 3. SAVE TO DB
                 final_email = f"processing_{timestamp}_{i}@zentiklabs.com"
                 cand_data = {
                     "job_id": selected_job['id'],
                     "name": uploaded_file.name, 
                     "email": final_email,
                     "resume_url": resume_url,
-                    "status": "AI Analysis in Progress" # <--- This is what you see in Dashboard
+                    "status": "AI Analysis in Progress"
                 }
                 
-                # Insert and get ID
                 response = supabase.table("candidates").insert(cand_data).execute()
                 new_row_id = response.data[0]['id']
 
-                # D. TRIGGER N8N (FIRE AND FORGET)
-                # We do NOT wait for the response. We just send it.
+                # 4. TRIGGER N8N (Fire and Forget)
                 payload = {
                     "candidate_id": new_row_id,
-                    "resume_text": resume_text,
+                    "resume_text": resume_text, # Contains table text now
                     "resume_url": resume_url,
                     "job_id": selected_job['id']
                 }
                 try:
-                    # timeout=1 ensures we don't hang if n8n is slow to acknowledge
                     requests.post(N8N_WEBHOOK, json=payload, timeout=2) 
                 except requests.exceptions.ReadTimeout:
-                    pass # This is expected behavior for "Fire and Forget"
+                    pass 
                 except Exception as e:
                     print(f"Webhook error: {e}")
 
             except Exception as e:
                 st.error(f"❌ Error on {uploaded_file.name}: {e}")
             
-            # Update Bar
+            # Update Upload Progress
             progress_bar.progress((i + 1) / len(uploaded_files))
             
-        status_text.text("✅ Uploads Sent to AI Queue!")
+        # --- B. THE 20s BUFFER TIMER ---
+        # This keeps the user on the page while n8n finishes in the background
+        status_text.markdown("✅ **Uploads Complete! Finalizing AI Analysis...**")
+        
+        # We reuse the progress bar for the countdown
+        buffer_seconds = 20
+        for tick in range(buffer_seconds):
+            time.sleep(1)
+            remaining = buffer_seconds - tick
+            status_text.markdown(f"⏳ **Syncing with AI Agent...** ({remaining}s remaining)")
+        
+        # --- C. FINISH ---
+        status_text.markdown("## ✅ All Done!")
         st.balloons()
-        st.success(f"Sent {len(uploaded_files)} resumes to the AI Agent.")
+        st.success(f"Successfully processed {len(uploaded_files)} resumes.")
         
-        # Direct them to where the action is
-        st.info("👉 Head over to the **Analysis Dashboard** to watch the scores update in real-time!")
-        
-        time.sleep(2)
-        st.switch_page("6_🔍_Candidate_Analysis.py") # Auto-redirect to the dashboard
+        st.info("👉 The AI has finished processing. Click **'Candidate Analysis'** in the sidebar to view the results.")
