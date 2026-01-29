@@ -5,7 +5,7 @@ import json
 import time
 
 # --- SETUP ---
-st.set_page_config(page_title="Candidate Analysis", layout="wide")
+st.set_page_config(page_title="Candidate Analysis | Zentik Labs", layout="wide")
 
 # --- CUSTOM STYLING ---
 st.markdown("""
@@ -49,10 +49,8 @@ except:
     jobs_dict = {}
 
 # Fetch Candidates with Job Title
-# We add ', jobs(title)' to the query
 query = supabase.table("candidates").select("*, jobs(title)").order("match_score", desc=True)
 
-# Apply Filter
 if selected_job_title != "All":
     job_id = jobs_dict[selected_job_title]
     query = query.eq("job_id", job_id)
@@ -69,7 +67,9 @@ df = pd.DataFrame(candidates)
 # Candidate Selector
 def format_func(x):
     row = df[df['id']==x].iloc[0]
-    return f"{row['name']} ({row['match_score']}%)"
+    # Handle potentially missing match_score
+    m_score = row.get('match_score', 0) if row.get('match_score') is not None else 0
+    return f"{row['name']} ({m_score}%)"
 
 selected_candidate_id = st.sidebar.radio(
     "Select Candidate", 
@@ -80,9 +80,8 @@ selected_candidate_id = st.sidebar.radio(
 candidate = df[df['id'] == selected_candidate_id].iloc[0]
 
 # --- 2. HEADER PROFILE CARD ---
-score = candidate.get('match_score', 0)
+score = candidate.get('match_score', 0) if candidate.get('match_score') is not None else 0
 score_color = "#2ecc71" if score > 80 else "#f1c40f" if score > 50 else "#e74c3c"
-# Extract Job Title safely
 job_title = candidate.get('jobs', {}).get('title', 'Unknown Role') if candidate.get('jobs') else 'Unknown Role'
 
 st.markdown(f"""
@@ -113,6 +112,10 @@ st.markdown(f"""
 </div>
 """, unsafe_allow_html=True)
 
+# Resume Quick Link
+if candidate.get('resume_url'):
+    st.link_button("📄 Open Original Resume", candidate['resume_url'], use_container_width=True)
+
 # Red Flags Alert
 red_flags = candidate.get('red_flags', 'None')
 if red_flags and red_flags not in ["None", "System Error"]:
@@ -127,8 +130,14 @@ with tab_analysis:
     with col1:
         st.subheader("Executive Summary")
         st.info(candidate.get('summary', 'No summary available.'))
+        
         st.subheader("Skill Match")
         skills = candidate.get('skills_found', [])
+        # Fix: Ensure skills is a list even if Supabase/n8n sent it as a string
+        if isinstance(skills, str):
+            try: skills = json.loads(skills)
+            except: skills = [skills]
+            
         if isinstance(skills, list) and skills:
             chips_html = " ".join([f'<span class="skill-chip">{s}</span>' for s in skills])
             st.markdown(chips_html, unsafe_allow_html=True)
@@ -138,12 +147,17 @@ with tab_analysis:
     with col2:
         st.subheader("⚠️ Critical Gaps")
         missing = candidate.get('missing_critical_skills', [])
+        # Fix: Ensure missing is a list
+        if isinstance(missing, str):
+            try: missing = json.loads(missing)
+            except: missing = [missing]
+            
         if missing:
             if isinstance(missing, list):
                 for m in missing: st.warning(m, icon="⚠️")
             else: st.warning(missing, icon="⚠️")
         else:
-            st.success("No critical gaps!")
+            st.success("No critical gaps identified.")
         
         suggested_fit = candidate.get('suggested_fit')
         if suggested_fit:
@@ -163,34 +177,32 @@ with tab_interview:
             if isinstance(questions, list):
                 for i, q in enumerate(questions): st.markdown(f"**Q{i+1}:** {q}")
             else: st.write(questions)
-        else: st.write("No questions generated.")
+        else:
+            st.write("No questions generated.")
             
     with col2:
         st.markdown("### 📝 Notes")
         existing_notes = candidate.get('interview_notes') or ""
         with st.form("notes_form"):
             new_notes = st.text_area("Interview Notes", value=existing_notes, height=200)
-            if st.form_submit_button("💾 Save", type="primary"):
+            if st.form_submit_button("💾 Save Notes", type="primary"):
                 supabase.table("candidates").update({"interview_notes": new_notes}).eq("id", candidate['id']).execute()
-                st.toast("Saved!", icon="✅")
+                st.toast("Notes Saved!", icon="✅")
 
 # --- TAB 3: ACTIONS ---
 with tab_actions:
     st.subheader("Decision Console")
     status = candidate.get('status', 'New')
-    is_hired = status in ['Hired', 'Pending Hire', 'Placed']
+    is_pending = status == "Pending Final Approval"
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        if not is_hired:
-            # CHANGED LABEL AND LOGIC
+        if not is_pending:
             if st.button("✨ Request Hiring Approval", use_container_width=True, type="primary"):
-                
                 # 1. Update Candidate Status
                 supabase.table("candidates").update({"status": "Pending Final Approval"}).eq("id", candidate['id']).execute()
                 
-                # 2. Create Placement Record (The Buffer Entry)
-                # We save the 'interview_notes' into the placement justification for easy reading later
+                # 2. Create Placement Record
                 job_id = candidate.get('job_id')
                 placement_data = {
                     "candidate_id": candidate['id'],
@@ -201,20 +213,23 @@ with tab_actions:
                 supabase.table("placements").insert(placement_data).execute()
                 
                 st.balloons()
-                st.success("Candidate sent to Management for Final Approval!")
-                time.sleep(2)
+                st.success("Candidate sent for Final Approval!")
+                time.sleep(1.5)
                 st.rerun()
         else:
-            st.success(f"Current Status: {status}")
+            st.info(f"Status: {status}")
 
     with c2:
-        if st.button("🚫 Reject", use_container_width=True):
+        if st.button("🚫 Reject Candidate", use_container_width=True):
             supabase.table("candidates").update({"status": "Rejected"}).eq("id", candidate['id']).execute()
-            st.warning("Rejected.")
+            st.warning("Candidate Rejected.")
+            time.sleep(1)
             st.rerun()
 
     with c3:
-        if st.button("🗑️ Delete", use_container_width=True):
+        if st.button("🗑️ Delete Record", use_container_width=True):
+            # Cleanup storage might be good here, but for now we delete DB entry
             supabase.table("candidates").delete().eq("id", candidate['id']).execute()
-            st.error("Deleted.")
+            st.error("Record Deleted.")
+            time.sleep(1)
             st.rerun()
