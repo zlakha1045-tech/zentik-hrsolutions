@@ -30,34 +30,37 @@ def read_pdf(file):
     except Exception as e:
         return f"Error reading PDF: {e}"
     return text
-
 def read_docx(file):
     """
-    Extracts text from Paragraphs, Tables, Headers, AND Footers.
+    Nuclear Option: Recursively extracts text from Body, Tables, Headers, Footers, 
+    and even Tables nested inside Headers/Footers.
     """
+    def extract_text_from_element(element, text_list):
+        # 1. Get text from Paragraphs in this element
+        for para in element.paragraphs:
+            if para.text.strip():
+                text_list.append(para.text)
+        
+        # 2. Get text from Tables in this element
+        for table in element.tables:
+            for row in table.rows:
+                for cell in row.cells:
+                    # RECURSION: Dive into the cell (which can contain paragraphs AND tables)
+                    extract_text_from_element(cell, text_list)
+
     try:
         doc = docx.Document(file)
         full_text = []
         
-        # 1. Extract Main Body Paragraphs
-        for para in doc.paragraphs:
-            full_text.append(para.text)
-            
-        # 2. Extract Tables (Layouts)
-        for table in doc.tables:
-            for row in table.rows:
-                for cell in row.cells:
-                    for para in cell.paragraphs:
-                        full_text.append(para.text)
+        # A. Scan the Main Body
+        extract_text_from_element(doc, full_text)
         
-        # 3. Extract Headers & Footers (Where contact info hides!)
+        # B. Scan all Sections (Headers & Footers)
         for section in doc.sections:
-            # Check Header
-            for header_para in section.header.paragraphs:
-                full_text.append(header_para.text)
-            # Check Footer
-            for footer_para in section.footer.paragraphs:
-                full_text.append(footer_para.text)
+            # Check Header (and tables inside it)
+            extract_text_from_element(section.header, full_text)
+            # Check Footer (and tables inside it)
+            extract_text_from_element(section.footer, full_text)
                         
         return "\n".join(full_text)
     except Exception as e:
