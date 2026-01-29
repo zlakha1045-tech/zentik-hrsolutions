@@ -33,22 +33,31 @@ def read_pdf(file):
 
 def read_docx(file):
     """
-    Extracts text from Paragraphs AND Tables (Crucial for Resumes)
+    Extracts text from Paragraphs, Tables, Headers, AND Footers.
     """
     try:
         doc = docx.Document(file)
         full_text = []
         
-        # 1. Extract Paragraphs
+        # 1. Extract Main Body Paragraphs
         for para in doc.paragraphs:
             full_text.append(para.text)
             
-        # 2. Extract Tables (Resumes often use hidden tables for layout)
+        # 2. Extract Tables (Layouts)
         for table in doc.tables:
             for row in table.rows:
                 for cell in row.cells:
                     for para in cell.paragraphs:
                         full_text.append(para.text)
+        
+        # 3. Extract Headers & Footers (Where contact info hides!)
+        for section in doc.sections:
+            # Check Header
+            for header_para in section.header.paragraphs:
+                full_text.append(header_para.text)
+            # Check Footer
+            for footer_para in section.footer.paragraphs:
+                full_text.append(footer_para.text)
                         
         return "\n".join(full_text)
     except Exception as e:
