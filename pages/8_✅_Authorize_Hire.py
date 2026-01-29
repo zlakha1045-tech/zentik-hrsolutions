@@ -12,15 +12,13 @@ except:
     st.stop()
 
 st.title("🛡️ Final Hiring Authorization")
-st.markdown("Review candidates selected by recruiters. Check the **MRF** and **Resume** before authorizing an Offer Letter.")
+st.markdown("Review candidates passed from the **Interview Room**. Check assessment evidence and recruiter notes before authorizing.")
 
 # --- FETCH PENDING APPROVALS ---
-# We look for status 'Pending Final Approval'
 try:
-    # We fetch Placement + Candidate + Job + Requisition (Linked to Job)
-    # Note: This relies on your foreign keys being set up correctly in Supabase
+    # UPDATED QUERY: Fetch interview_assets and interview_notes from candidates table
     response = supabase.table("placements").select(
-        "*, candidates(name, email, resume_url), jobs(title, department, requisitions(signed_mrf_url, number_required))"
+        "*, candidates(name, email, resume_url, interview_assets, interview_notes), jobs(title, department, requisitions(signed_mrf_url, number_required))"
     ).eq("status", "Pending Final Approval").execute()
     
     approvals = response.data
@@ -29,14 +27,13 @@ except Exception as e:
     st.stop()
 
 if not approvals:
-    st.info("✅ No candidates waiting for authorization.")
+    st.info("✅ No candidates waiting for final authorization.")
     st.stop()
 
 # --- DISPLAY CARDS ---
 for item in approvals:
     cand = item['candidates']
     job = item['jobs']
-    # Handle case where job might not have a linked requisition
     req = job['requisitions'] if job.get('requisitions') else {}
     
     with st.container():
@@ -59,14 +56,33 @@ for item in approvals:
         </div>
         """, unsafe_allow_html=True)
 
-        # Recruiter Summary Section
-        with st.expander("💬 Recruiter Notes / Justification", expanded=True):
-            st.info(item.get('justification') or "No specific notes from the recruiter.")
+        c1, c2 = st.columns([1, 1])
+
+        # Recruiter / Interview Notes
+        with c1:
+            st.subheader("💬 Interview Assessment")
+            # We prefer the specific interview notes from the placement record justification
+            notes = item.get('justification') or cand.get('interview_notes') or "No specific notes provided."
+            st.info(notes)
+
+        # Evidence Display
+        with c2:
+            st.subheader("📹 Assessment Evidence")
+            assets = cand.get('interview_assets')
+            
+            if assets and isinstance(assets, list) and len(assets) > 0:
+                for asset in assets:
+                    # Renders a clickable button/link for each video or test result
+                    st.markdown(f"📎 **[{asset['name']}]({asset['url']})**")
+            else:
+                st.markdown("_No files uploaded in Interview Room._")
+
+        st.divider()
 
         # ACTION BUTTONS
-        c1, c2 = st.columns([1, 5])
+        btn_col1, btn_col2 = st.columns([1, 5])
         
-        with c1:
+        with btn_col1:
             if st.button("✅ Authorize Offer", key=f"auth_{item['id']}", type="primary"):
                 # Move to next stage: 'Ready for Offer'
                 supabase.table("placements").update({"status": "Ready for Offer"}).eq("id", item['id']).execute()
@@ -76,7 +92,7 @@ for item in approvals:
                 st.success("Authorized! Sent to Placement Manager for Offer Generation.")
                 st.rerun()
                 
-        with c2:
+        with btn_col2:
             if st.button("🚫 Reject Selection", key=f"rej_{item['id']}"):
                 supabase.table("placements").update({"status": "Rejected by Mgmt"}).eq("id", item['id']).execute()
                 supabase.table("candidates").update({"status": "Rejected"}).eq("id", item['candidate_id']).execute()

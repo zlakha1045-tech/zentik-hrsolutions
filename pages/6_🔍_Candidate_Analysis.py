@@ -193,31 +193,24 @@ with tab_interview:
 with tab_actions:
     st.subheader("Decision Console")
     status = candidate.get('status', 'New')
-    is_pending = status == "Pending Final Approval"
+    
+    # Logic: Can only shortlist if they are New or In Progress
+    can_shortlist = status in ['New', 'AI Analysis Complete', 'AI Analysis in Progress']
     
     c1, c2, c3 = st.columns(3)
     with c1:
-        if not is_pending:
-            if st.button("✨ Request Hiring Approval", use_container_width=True, type="primary"):
-                # 1. Update Candidate Status
-                supabase.table("candidates").update({"status": "Pending Final Approval"}).eq("id", candidate['id']).execute()
-                
-                # 2. Create Placement Record
-                job_id = candidate.get('job_id')
-                placement_data = {
-                    "candidate_id": candidate['id'],
-                    "job_id": job_id,
-                    "status": "Pending Final Approval",
-                    "justification": candidate.get('interview_notes', 'No specific notes provided.') 
-                }
-                supabase.table("placements").insert(placement_data).execute()
+        if can_shortlist:
+            # CHANGED: Replaced "Request Approval" with "Shortlist"
+            if st.button("✨ Shortlist for Interview", use_container_width=True, type="primary"):
+                # 1. Update Candidate Status to 'Shortlisted'
+                supabase.table("candidates").update({"status": "Shortlisted"}).eq("id", candidate['id']).execute()
                 
                 st.balloons()
-                st.success("Candidate sent for Final Approval!")
+                st.success("Candidate Shortlisted! Proceed to the 'Interview Room'.")
                 time.sleep(1.5)
                 st.rerun()
         else:
-            st.info(f"Status: {status}")
+            st.info(f"Current Status: {status}")
 
     with c2:
         if st.button("🚫 Reject Candidate", use_container_width=True):
@@ -228,7 +221,6 @@ with tab_actions:
 
     with c3:
         if st.button("🗑️ Delete Record", use_container_width=True):
-            # Cleanup storage might be good here, but for now we delete DB entry
             supabase.table("candidates").delete().eq("id", candidate['id']).execute()
             st.error("Record Deleted.")
             time.sleep(1)
