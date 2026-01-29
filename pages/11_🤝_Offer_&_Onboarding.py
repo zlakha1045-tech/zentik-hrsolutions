@@ -98,8 +98,9 @@ def create_offer_pdf(data):
     pdf.ln(15)
     pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    # Return PDF as bytes
-    return pdf.output(dest='S').encode('latin-1')
+    # --- THE FIX IS HERE ---
+    # fpdf2 returns a bytearray directly. We cast it to bytes just to be safe.
+    return bytes(pdf.output())
 
 # --- UI START ---
 hero_section("assets/login_hero.jpg", "Placement & Offers", "Generate Offer Letters and Finalize Hires.")
