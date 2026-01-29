@@ -4,7 +4,7 @@ from styles import load_css, hero_section
 import time
 import mimetypes
 from fpdf import FPDF
-import base64
+from streamlit_pdf_viewer import pdf_viewer  # <--- NEW LIBRARY
 
 st.set_page_config(page_title="Placement Manager", layout="wide")
 load_css()
@@ -19,12 +19,11 @@ except:
 # --- HELPER: GENERATE PDF OFFER ---
 class OfferPDF(FPDF):
     def header(self):
-        # --- FIX 1: FORCE SOLID WHITE BACKGROUND ---
-        # This prevents the "Black text on dark background" issue
+        # Force White Background
         self.set_fill_color(255, 255, 255)
         self.rect(0, 0, 210, 297, 'F')
         
-        # Standard Header
+        # Header Content
         self.set_font('Arial', 'B', 20)
         self.cell(0, 10, 'ZENTIK LABS', 0, 1, 'C')
         self.set_font('Arial', 'I', 10)
@@ -104,7 +103,7 @@ def create_offer_pdf(data):
     pdf.ln(15)
     pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    # Returns raw bytes (Compatible with fpdf2)
+    # Return raw bytes for PDF Viewer
     return bytes(pdf.output())
 
 # --- UI START ---
@@ -117,7 +116,6 @@ tab_draft, tab_final = st.tabs(["📝 Draft & Send Offer", "🏁 Finalize Hire (
 with tab_draft:
     st.subheader("1. Generate Offer Letter")
     
-    # Fetch Data
     try:
         response = supabase.table("placements").select("*, candidates(name, email), jobs(title, department)").eq("status", "Ready for Offer").execute()
         pending_list = response.data
@@ -127,7 +125,6 @@ with tab_draft:
     if not pending_list:
         st.info("✅ No new offers to generate.")
     else:
-        # Session State to keep the buttons alive after download
         if 'offer_generated' not in st.session_state:
             st.session_state.offer_generated = False
         
@@ -165,14 +162,14 @@ with tab_draft:
                 "probation": probation
             }
             
-            # Generate PDF
+            # Generate PDF Bytes
             pdf_bytes = create_offer_pdf(offer_data)
-            base64_pdf = base64.b64encode(pdf_bytes).decode('utf-8')
             
-            # --- FIX 2: Use <object> tag instead of <embed> ---
-            pdf_display = f'<object data="data:application/pdf;base64,{base64_pdf}" type="application/pdf" width="100%" height="600px"><p>Your browser does not support PDF previews.</p></object>'
-            st.markdown(pdf_display, unsafe_allow_html=True)
-            
+            # --- THE FIX: USE STREAMLIT-PDF-VIEWER ---
+            st.markdown("### 📄 Offer Letter Preview")
+            pdf_viewer(input=pdf_bytes, width=700)
+            # ----------------------------------------
+
             # ACTION BUTTONS
             col_d1, col_d2 = st.columns(2)
             with col_d1:
