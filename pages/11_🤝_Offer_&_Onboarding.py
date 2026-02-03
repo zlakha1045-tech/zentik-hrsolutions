@@ -5,7 +5,7 @@ import time
 import mimetypes
 from fpdf import FPDF
 import base64
-import streamlit.components.v1 as components # Native HTML renderer
+import streamlit.components.v1 as components
 
 st.set_page_config(page_title="Placement Manager", layout="wide")
 load_css()
@@ -66,7 +66,9 @@ def create_offer_pdf(data):
     pdf.set_xy(10, y_pos); pdf.cell(90, 5, "Sincerely,", 0, 1); pdf.ln(15); pdf.cell(90, 5, "HR Manager", 0, 1); pdf.cell(90, 5, "Zentik Labs", 0, 1)
     pdf.set_xy(110, y_pos); pdf.cell(90, 5, "Accepted By:", 0, 1); pdf.ln(15); pdf.cell(90, 5, data['candidate_name'], 0, 1)
     
-    return bytes(pdf.output())
+    # --- THE FIX ---
+    # Convert the string output to bytes using latin-1 encoding
+    return pdf.output(dest='S').encode('latin-1')
 
 # ==========================================
 # HELPER 2: GENERATE HTML (For Preview)
