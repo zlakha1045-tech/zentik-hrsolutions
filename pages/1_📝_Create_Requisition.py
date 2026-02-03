@@ -1,194 +1,192 @@
 import streamlit as st
 from supabase import create_client
 from styles import load_css, hero_section
-import time
 from fpdf import FPDF
-import streamlit.components.v1 as components
+import time
 
-st.set_page_config(page_title="Create Requisition", layout="wide")
+st.set_page_config(page_title="Draft Requisition", layout="wide")
 load_css()
 
-# --- SETUP SUPABASE ---
 try:
     supabase = create_client(st.secrets["supabase"]["url"], st.secrets["supabase"]["key"])
 except:
     st.error("Missing Supabase Secrets.")
     st.stop()
 
-# ==========================================
-# 1. PDF GENERATOR (The Fix)
-# ==========================================
+# --- HELPER: CLEAN TEXT ---
+def clean_text(text):
+    if not text: return ""
+    # Standardize characters to Latin-1 safe versions
+    replacements = {
+        '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"', 
+        '\u2013': '-', '\u2022': '*'
+    }
+    for old, new in replacements.items():
+        text = text.replace(old, new)
+    return text.encode('latin-1', 'replace').decode('latin-1')
+
+# --- PDF GENERATOR CLASS ---
 class MRF_PDF(FPDF):
     def header(self):
-        self.set_fill_color(255, 255, 255)
-        self.rect(0, 0, 210, 297, 'F') # Force White Background
         self.set_font('Arial', 'B', 16)
-        self.cell(0, 10, 'MANPOWER REQUISITION FORM (MRF)', 0, 1, 'C')
-        self.ln(10)
+        self.cell(0, 10, 'ZentikLabs', 0, 1, 'C')
+        self.set_font('Arial', 'B', 12)
+        self.cell(0, 10, 'Manpower Requisition Form', 0, 1, 'C')
+        self.ln(5)
 
-    def footer(self):
-        self.set_y(-15)
+    def section_title(self, title):
+        self.set_font('Arial', 'B', 10)
+        self.set_fill_color(240, 240, 240)
+        self.cell(0, 8, title, 1, 1, 'L', fill=True)
+
+    def draw_form(self, data):
+        self.add_page()
+        self.set_font('Arial', '', 10)
+
+        # 1. OFFICIAL USE BOX
         self.set_font('Arial', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}', 0, 0, 'C')
+        self.multi_cell(0, 5, "Note: This MRF is to be used for Non-exempt and Exempt positions only. Please complete thoroughly.\nAll MRFs must be approved by General Manager/Managing Director before submission to HR.", 1)
+        self.ln(2)
 
-def create_mrf_pdf(data):
-    pdf = MRF_PDF()
-    pdf.add_page()
-    pdf.set_text_color(0, 0, 0)
-    
-    # Section: Job Details
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, '1. JOB DETAILS', 0, 1)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(2)
-    
-    pdf.set_font('Arial', '', 10)
-    details = [
-        f"Job Title: {data['title']}",
-        f"Department: {data['department']}",
-        f"Hiring Manager: {data['manager']}",
-        f"Number of Positions: {data['count']}",
-        f"Employment Type: {data['type']}"
-    ]
-    for d in details:
-        pdf.cell(0, 8, f"- {d}", 0, 1)
-    
-    pdf.ln(5)
-    
-    # Section: Budget & Compensation
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, '2. BUDGET & COMPENSATION', 0, 1)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(2)
-    
-    pdf.set_font('Arial', '', 10)
-    pdf.cell(0, 8, f"Salary Range: {data['salary']}", 0, 1)
-    
-    pdf.ln(5)
-    
-    # Section: Justification
-    pdf.set_font('Arial', 'B', 12)
-    pdf.cell(0, 10, '3. JUSTIFICATION', 0, 1)
-    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
-    pdf.ln(2)
-    
-    pdf.set_font('Arial', '', 10)
-    pdf.multi_cell(0, 6, data['justification'])
-    
-    pdf.ln(10)
-    pdf.set_font('Arial', 'I', 10)
-    pdf.cell(0, 10, "Requested By: __________________________   Date: ____________", 0, 1)
+        # 2. REQUISITOR
+        self.section_title("REQUISITOR")
+        self.set_font('Arial', '', 10)
+        self.cell(40, 10, "Name:", border='LBT')
+        self.cell(150, 10, clean_text(data.get('requisitor_name', '')), border='RBT', ln=1)
+        self.cell(40, 10, "Department:", border='LBT')
+        self.cell(80, 10, clean_text(data.get('requisitor_dept', '')), border='BT')
+        self.cell(30, 10, "Tel/Ext:", border='BT')
+        self.cell(40, 10, clean_text(data.get('requisitor_ext', '')), border='RBT', ln=1)
+        self.ln(2)
 
-    # --- THE FIX ---
-    # Return raw bytes directly (Compatible with fpdf2)
-    return bytes(pdf.output())
+        # 3. MANPOWER REQUIRED
+        self.section_title("MANPOWER REQUIRED")
+        self.cell(40, 10, "Job Title:", border='LBT')
+        self.cell(80, 10, clean_text(data.get('job_title', '')), border='BT')
+        self.cell(20, 10, "Shift:", border='BT')
+        self.cell(50, 10, clean_text(data.get('shift', '')), border='RBT', ln=1)
+        self.cell(40, 10, "Number Required:", border='LBT')
+        self.cell(80, 10, str(data.get('number_required', '')), border='BT')
+        self.cell(30, 10, "Date Required:", border='BT')
+        self.cell(40, 10, str(data.get('date_required', '')), border='RBT', ln=1)
+        self.ln(2)
 
-# ==========================================
-# 2. HTML PREVIEW GENERATOR
-# ==========================================
-def generate_mrf_html(data):
-    return f"""
-    <div style="font-family: Arial, sans-serif; padding: 40px; background: white; border: 1px solid #ccc; max-width: 800px; margin: auto;">
-        <h2 style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 10px;">MANPOWER REQUISITION FORM</h2>
+        # 4. CLASSIFICATION
+        self.section_title("CLASSIFICATION")
+        rtype = clean_text(data.get('recruitment_type', ''))
+        self.cell(10, 8, "(A)", 0, 0)
+        self.cell(50, 8, f"[{'X' if rtype and 'Additional' in rtype else ' '}] Additional Position", 0, 0)
+        self.cell(60, 8, f"[{'X' if rtype and 'Replacement' in rtype else ' '}] Replacement", 0, 0)
+        self.cell(0, 8, f"Reason: {clean_text(data.get('replacement_reason', 'N/A'))}", 0, 1)
+
+        enature = clean_text(data.get('employment_nature', ''))
+        self.cell(10, 8, "(B)", 0, 0)
+        self.cell(50, 8, f"[{'X' if enature and 'Full-time' in enature else ' '}] Full-time", 0, 0)
+        self.cell(50, 8, f"[{'X' if enature and 'Part-time' in enature else ' '}] Part-time", 0, 0)
+        self.cell(50, 8, f"[{'X' if enature and 'Contract' in enature else ' '}] Contract", 0, 1)
+
+        src = clean_text(data.get('hiring_source', ''))
+        self.cell(10, 8, "(C)", 0, 0)
+        self.cell(50, 8, f"[{'X' if src and 'Within' in src else ' '}] Within Company", 0, 0)
+        self.cell(50, 8, f"[{'X' if src and 'Outside' in src else ' '}] Outside", 0, 1)
+        self.ln(2)
+
+        # 5. REQUIREMENTS
+        self.section_title("QUALIFICATIONS REQUIRED")
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Education:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('education_req', '')), 1)
         
-        <h3 style="background: #eee; padding: 5px;">1. JOB DETAILS</h3>
-        <p><strong>Job Title:</strong> {data['title']}</p>
-        <p><strong>Department:</strong> {data['department']}</p>
-        <p><strong>Manager:</strong> {data['manager']}</p>
-        <p><strong>Positions:</strong> {data['count']} | <strong>Type:</strong> {data['type']}</p>
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Skills:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('skills_req', '')), 1)
         
-        <h3 style="background: #eee; padding: 5px;">2. BUDGET</h3>
-        <p><strong>Salary Range:</strong> {data['salary']}</p>
-        
-        <h3 style="background: #eee; padding: 5px;">3. JUSTIFICATION</h3>
-        <p>{data['justification']}</p>
-        
-        <br><br>
-        <div style="border-top: 1px solid #000; padding-top: 10px; margin-top: 30px;">
-            <p><strong>Requested By:</strong> {data['manager']} &nbsp;&nbsp;&nbsp; <strong>Date:</strong> {time.strftime('%Y-%m-%d')}</p>
-        </div>
-    </div>
-    """
+        self.set_font('Arial', 'B', 9); self.cell(0, 6, "Experience:", 0, 1)
+        self.set_font('Arial', '', 9); self.multi_cell(0, 6, clean_text(data.get('experience_req', '')), 1)
+        self.ln(2)
 
-# --- UI START ---
-hero_section("assets/login_hero.jpg", "Create Requisition", "Draft new roles for management approval.")
+        # 6. RESPONSIBILITIES
+        self.section_title("AREAS OF RESPONSIBILITY")
+        self.set_font('Arial', '', 9)
+        self.multi_cell(0, 6, clean_text(data.get('responsibilities', '')), 1)
+        self.ln(5)
 
-st.subheader("📝 New Role Request")
+        # 7. APPROVALS
+        self.section_title("APPROVALS")
+        self.ln(15) 
+        y = self.get_y()
+        self.line(10, y, 70, y); self.line(80, y, 140, y); self.line(150, y, 200, y)
+        self.cell(60, 5, "Requisitor Signature", 0, 0, 'C')
+        self.cell(10, 5, "", 0, 0)
+        self.cell(60, 5, "General Manager", 0, 0, 'C')
+        self.cell(10, 5, "", 0, 0)
+        self.cell(50, 5, "Managing Director", 0, 1, 'C')
 
-# SESSION STATE FOR FORM
-if 'mrf_generated' not in st.session_state:
-    st.session_state.mrf_generated = False
+# --- MAIN FORM LOGIC ---
+hero_section("assets/login_hero.jpg", "Create Requisition", "Step 1: Fill details & Download PDF.")
 
-with st.form("mrf_form"):
-    c1, c2 = st.columns(2)
-    with c1:
-        title = st.text_input("Job Title", "Technical Sales Manager")
-        department = st.selectbox("Department", ["Sales", "Engineering", "Marketing", "HR"])
-        manager = st.text_input("Hiring Manager", "Alex Mercer")
-    with c2:
-        count = st.number_input("Number of Positions", min_value=1, value=1)
-        emp_type = st.selectbox("Type", ["Full-Time", "Part-Time", "Contract"])
-        salary = st.text_input("Budgeted Salary Range", "$80,000 - $100,000")
-        
-    justification = st.text_area("Justification for Hire", "We need to expand our sales team to handle incoming enterprise leads.")
+st.subheader("📝 New Manpower Requisition")
+
+with st.form("new_mrf_form"):
+    st.markdown("### 🏢 Requisitor Info")
+    c1, c2, c3 = st.columns(3)
+    req_name = c1.text_input("Requisitor Name")
+    req_dept = c2.text_input("Department")
+    req_ext  = c3.text_input("Tel / Ext")
+
+    st.markdown("### 👷 Position Details")
+    r1, r2, r3, r4 = st.columns(4)
+    job_title = r1.text_input("Job Title")
+    shift     = r2.text_input("Shift", value="Day")
+    num_req   = r3.number_input("No. Required", min_value=1, value=1)
+    date_req  = r4.date_input("Date Required")
+
+    st.markdown("### ✅ Classification")
+    cl1, cl2 = st.columns(2)
+    with cl1:
+        rec_type = st.radio("Recruitment Type", ["Additional Position", "Replacement"])
+        rep_reason = st.text_input("If Replacement, Reason:") if rec_type == "Replacement" else None
+    with cl2:
+        emp_nature = st.radio("Employment Nature", ["Full-time", "Part-time", "Contract"])
+        source     = st.radio("Source", ["Within", "Outside", "Both"])
+
+    st.markdown("### 🎓 Requirements")
+    edu_req    = st.text_area("Education Required")
+    skills_req = st.text_area("Skills Required")
+    exp_req    = st.text_area("Experience Required")
+    resp       = st.text_area("Key Responsibilities", height=150)
     
-    # REQUIREMENTS (HIDDEN FOR PDF, USED FOR DB)
-    reqs = st.text_area("Key Requirements / Skills", "Salesforce, B2B Sales, Leadership")
-    
-    generate_btn = st.form_submit_button("👀 Preview & Generate MRF")
+    submitted_draft = st.form_submit_button("💾 Save Draft & Generate PDF")
 
-# --- LOGIC ---
-if generate_btn or st.session_state.mrf_generated:
-    st.session_state.mrf_generated = True
-    
+if submitted_draft:
     mrf_data = {
-        "title": title, "department": department, "manager": manager,
-        "count": count, "type": emp_type, "salary": salary,
-        "justification": justification
+        "requisitor_name": req_name, "requisitor_dept": req_dept, "requisitor_ext": req_ext,
+        "job_title": job_title, "shift": shift, "number_required": num_req, "date_required": str(date_req),
+        "recruitment_type": rec_type, "replacement_reason": rep_reason,
+        "employment_nature": emp_nature, "hiring_source": source,
+        "education_req": edu_req, "skills_req": skills_req, "experience_req": exp_req,
+        "responsibilities": resp,
+        "status": "Draft"
     }
     
-    # 1. SHOW HTML PREVIEW
-    st.markdown("### 📄 Document Preview")
-    html_view = generate_mrf_html(mrf_data)
-    components.html(html_view, height=600, scrolling=True)
-    
-    # 2. GENERATE PDF
-    pdf_bytes = create_mrf_pdf(mrf_data)
-    
-    col_a, col_b = st.columns(2)
-    with col_a:
+    try:
+        # Save Draft to DB
+        supabase.table("requisitions").insert(mrf_data).execute()
+        
+        # Generate PDF
+        pdf = MRF_PDF()
+        pdf.draw_form(mrf_data)
+        
+        # FIX: Removed dest='S' to get bytearray directly
+        pdf_bytes = bytes(pdf.output()) 
+        
+        st.success("✅ Saved! Download below.")
         st.download_button(
-            "📥 Download MRF (PDF)", 
+            label="⬇️ Download PDF Template",
             data=pdf_bytes,
-            file_name=f"MRF_{title.replace(' ', '_')}.pdf",
-            mime="application/pdf"
+            file_name=f"MRF_{job_title.replace(' ', '_')}.pdf",
+            mime="application/pdf",
+            type="primary"
         )
-    
-    with col_b:
-        if st.button("🚀 Submit for Approval", type="primary"):
-            try:
-                # 1. Upload PDF
-                timestamp = int(time.time())
-                path = f"requisitions/{timestamp}_{title.replace(' ', '_')}.pdf"
-                supabase.storage.from_("resumes").upload(path, pdf_bytes, {"content-type": "application/pdf"})
-                public_url = supabase.storage.from_("resumes").get_public_url(path)
-                
-                # 2. Insert to DB
-                # Note: We are saving the raw text description for the Job Board later
-                job_data = {
-                    "title": title,
-                    "department": department,
-                    "status": "Pending", # Needs approval
-                    "description": f"{justification}\n\nRequirements:\n{reqs}",
-                    "mrf_url": public_url
-                }
-                
-                supabase.table("requisitions").insert(job_data).execute()
-                
-                st.session_state.mrf_generated = False
-                st.success("Requisition Submitted! Waiting for Management Approval.")
-                time.sleep(2)
-                st.switch_page("pages/3_✅_Approve_Requisition.py")
-                
-            except Exception as e:
-                st.error(f"Error submitting: {e}")
+        st.info("👉 Once signed, go to **Submit Signed MRF** to upload it.")
+        
+    except Exception as e:
+        st.error(f"Error: {e}")
