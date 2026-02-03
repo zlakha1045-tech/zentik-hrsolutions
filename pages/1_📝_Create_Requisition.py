@@ -16,13 +16,14 @@ except:
 # --- HELPER: CLEAN TEXT ---
 def clean_text(text):
     if not text: return ""
-    # Standardize characters to Latin-1 safe versions
+    # Replace common "smart quotes" that break PDF generation
     replacements = {
         '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"', 
         '\u2013': '-', '\u2022': '*'
     }
     for old, new in replacements.items():
         text = text.replace(old, new)
+    # Force Latin-1 compatibility
     return text.encode('latin-1', 'replace').decode('latin-1')
 
 # --- PDF GENERATOR CLASS ---
@@ -175,8 +176,9 @@ if submitted_draft:
         pdf = MRF_PDF()
         pdf.draw_form(mrf_data)
         
-        # FIX: Removed dest='S' to get bytearray directly
-        pdf_bytes = bytes(pdf.output()) 
+        # --- THE FIX ---
+        # Explicitly ask for string output ('S') and then encode it to bytes
+        pdf_bytes = pdf.output(dest='S').encode('latin-1')
         
         st.success("✅ Saved! Download below.")
         st.download_button(
